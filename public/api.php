@@ -86,6 +86,74 @@ function dummyToSections($content) {
     return [$sections, $list];
 }
 
+function defaultWhatWeDoBoxes() {
+    return [
+        [
+            'image_url'   => 'intime-12',
+            'heading'     => 'Business & Strategy',
+            'text'        => "If you're looking for car insurance, we will help you to find the coverage that budget friendly.",
+            'button_text' => 'Read more',
+            'button_url'  => '#services',
+        ],
+        [
+            'image_url'   => 'intime-06',
+            'heading'     => 'Business Planner',
+            'text'        => "If you're looking for car insurance, we will help you to find the coverage that budget friendly.",
+            'button_text' => 'Read more',
+            'button_url'  => '#services',
+        ],
+        [
+            'image_url'   => 'intime-15',
+            'heading'     => 'Business Intelligence',
+            'text'        => "If you're looking for car insurance, we will help you to find the coverage that budget friendly.",
+            'button_text' => 'Read more',
+            'button_url'  => '#services',
+        ],
+    ];
+}
+
+function normalizeWhatWeDoContent($content) {
+    if (!is_array($content)) $content = [];
+    $defaults = defaultWhatWeDoBoxes();
+    $legacy = isset($content['eyebrow'], $content['subheading']) && !isset($content['text']) && !isset($content['boxes']);
+    $list = [];
+    if (isset($content['boxes']) && is_array($content['boxes']) && count($content['boxes'])) {
+        $list = $content['boxes'];
+    } elseif (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
+        $list = $content['items'];
+    }
+    $boxes = [];
+    for ($i = 0; $i < 3; $i++) {
+        $item = $list[$i] ?? [];
+        $fallback = $defaults[$i];
+        $boxes[] = [
+            'image_url'   => $item['image_url'] ?? $item['img'] ?? $item['image'] ?? $fallback['image_url'],
+            'heading'     => $item['heading'] ?? $item['title'] ?? $fallback['heading'],
+            'text'        => $item['text'] ?? $item['desc'] ?? $fallback['text'],
+            'button_text' => $item['button_text'] ?? $item['read_more'] ?? $fallback['button_text'],
+            'button_url'  => $item['button_url'] ?? $item['url'] ?? $item['link'] ?? $fallback['button_url'],
+        ];
+    }
+    return [
+        'subheading' => $legacy ? $content['eyebrow'] : ($content['subheading'] ?? $content['eyebrow'] ?? 'WHAT WE DO'),
+        'heading'    => $content['heading'] ?? 'We are the best agency to improve your deals.',
+        'text'       => $legacy ? $content['subheading'] : ($content['text'] ?? 'Improve efficiency, provide a better customer experience with modern technology services available around the world. Our skilled staff, combined with decades of experience.'),
+        'boxes'      => $boxes,
+    ];
+}
+
+function ensureWhatWeDoSection(&$content) {
+    $source = $content['What we do'] ?? $content['Features Carousel'] ?? null;
+    if ($source === null) return false;
+    $normalized = normalizeWhatWeDoContent(is_array($source) ? $source : []);
+    $changed = !isset($content['What we do'])
+        || isset($content['Features Carousel'])
+        || json_encode($content['What we do']) !== json_encode($normalized);
+    $content['What we do'] = $normalized;
+    unset($content['Features Carousel']);
+    return $changed;
+}
+
 $pdo = getPdoConnection($DB_HOST, $DB_NAME, $DB_USER, $DB_PASS);
 
 // --------------------------------------------------------------------------
@@ -279,6 +347,10 @@ if ($pdo) {
             
             if ($seed && !$heroHasLists && !isset($content['Hero Slider']['slides'])) {
                 $content = array_replace_recursive($seed, $content);
+                $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
+                $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
+            }
+            if (ensureWhatWeDoSection($content)) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
