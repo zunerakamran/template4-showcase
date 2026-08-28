@@ -161,6 +161,17 @@ function defaultAboutGauges() {
     ];
 }
 
+function pickAboutText($content, $keys, $fallback = '') {
+    foreach ($keys as $key) {
+        if (!array_key_exists($key, $content)) continue;
+        $value = $content[$key];
+        if ($value === null || $value === '') continue;
+        if (is_array($value) || is_object($value)) continue;
+        return $value;
+    }
+    return $fallback;
+}
+
 function normalizeAboutContent($content) {
     if (!is_array($content)) $content = [];
     $defaults = defaultAboutGauges();
@@ -172,22 +183,31 @@ function normalizeAboutContent($content) {
     }
     $gauges = [];
     for ($i = 0; $i < 2; $i++) {
-        $item = $list[$i] ?? [];
+        $item = is_array($list[$i] ?? null) ? $list[$i] : [];
+        $n = $i + 1;
         $fallback = $defaults[$i];
         $gauges[] = [
-            'value' => $item['value'] ?? $item['pct'] ?? $fallback['value'],
-            'label' => $item['label'] ?? $item['heading'] ?? $fallback['label'],
+            'value' => $content["percent_{$n}"] ?? $content["percentage_{$n}"] ?? $item['value'] ?? $item['percentage'] ?? $item['pct'] ?? $fallback['value'],
+            'label' => $content["percent_{$n}_text"] ?? $content["percentage_{$n}_text"] ?? $item['label'] ?? $item['text'] ?? $item['heading'] ?? $fallback['label'],
         ];
+    }
+    $image = $content['image_preview'] ?? $content['image_url'] ?? $content['image'] ?? $content['img'] ?? 'intime-04.jpg';
+    if (is_array($image)) {
+        $image = $image['url'] ?? $image['path'] ?? $image['relative_url'] ?? $image['src'] ?? 'intime-04.jpg';
     }
     return [
         'eyebrow'          => $content['eyebrow'] ?? 'ABOUT US',
         'heading'          => $content['heading'] ?? 'Why will you choose our?',
         'subheading'       => $content['subheading'] ?? 'Our agency can only be as strong as our people & because of this, our team have designed game changing products.',
         'text'             => $content['text'] ?? "Intime is a design studio founded in London. Nowadays, we've grown and expanded our services, and have become a multinational firm, offering a variety of services and solutions Worldwide.",
-        'image_url'        => $content['image_url'] ?? $content['image'] ?? $content['img'] ?? 'intime-04.jpg',
-        'experience_years' => $content['experience_years'] ?? $content['years'] ?? '10+',
-        'experience_label' => $content['experience_label'] ?? 'Years of Experience',
+        'image_url'        => $image,
+        'experience_years' => pickAboutText($content, ['experience_years', 'red_box_number', 'red_box', 'years'], '10+'),
+        'experience_label' => pickAboutText($content, ['experience_label', 'red_box_text', 'red_box_label'], 'Years of Experience'),
         'gauges'           => $gauges,
+        'percent_1'        => $gauges[0]['value'],
+        'percent_1_text'   => $gauges[0]['label'],
+        'percent_2'        => $gauges[1]['value'],
+        'percent_2_text'   => $gauges[1]['label'],
     ];
 }
 
