@@ -1,12 +1,12 @@
 import React from 'react';
-import { imgFallback, images } from '../../utils/img';
+import { getLocalImg, imgFallback, images } from '../../utils/img';
 
 const AboutSection = ({ data }) => {
   const eyebrow = data?.eyebrow || 'ABOUT US';
   const heading = data?.heading || 'Why will you choose our?';
   const subheading = data?.subheading || 'Our agency can only be as strong as our people & because of this, our team have designed game changing products.';
   const text = data?.text || "Intime is a design studio founded in London. Nowadays, we've grown and expanded our services, and have become a multinational firm, offering a variety of services and solutions Worldwide.";
-  const imgUrl = data?.image_url || images.intime04;
+  const imgUrl = getLocalImg(data?.image_url || images.intime04);
   const expYears = data?.experience_years || '10+';
 
   return (

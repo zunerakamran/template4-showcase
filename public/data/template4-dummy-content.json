@@ -19,15 +19,15 @@
     "slides": [
       {
         "title": ["Prosper in this", "volatile market", "funding."],
-        "image_url": "intime-08.jpg"
+        "image_url": "intime-08"
       },
       {
         "title": ["We do the best", "thing for market", "funding."],
-        "image_url": "intime-12.jpg"
+        "image_url": "intime-12"
       },
       {
         "title": ["We have to do", "business for your", "Satisfiction."],
-        "image_url": "intime-15.jpg"
+        "image_url": "intime-15"
       }
     ]
   },
@@ -40,7 +40,7 @@
         "icon": "briefcase",
         "title": "Business & Strategy",
         "text": "If you're looking for car insurance, we will help you to find the coverage that budget friendly.",
-        "image_url": "intime-12.jpg"
+        "image_url": "intime-12"
       },
       {
         "icon": "chart",
@@ -52,7 +52,7 @@
         "icon": "lightbulb",
         "title": "Business Intelligence",
         "text": "If you're looking for car insurance, we will help you to find the coverage that budget friendly.",
-        "image_url": "intime-15.jpg"
+        "image_url": "intime-15"
       }
     ]
   },
