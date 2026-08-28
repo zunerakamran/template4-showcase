@@ -220,6 +220,73 @@ function ensureAboutSection(&$content) {
     return $changed;
 }
 
+function defaultCompanyHistoryYears() {
+    return [
+        ['year' => '2010', 'red_text' => '2010 Milestone', 'grey_text' => 'Company Founded', 'heading' => 'Started Business', 'image_url' => 'intime-06.jpg', 'text' => "We partner with you to enable your technology so you focus on your organization's mission, leveraging our top-tier talent."],
+        ['year' => '2012', 'red_text' => '2012 Milestone', 'grey_text' => '10+ Key Partners', 'heading' => 'Resilience & Expansion', 'image_url' => 'intime-07.jpg', 'text' => 'A dedicated People Ops leader committed to the growth and continuous development of leaders across operations.'],
+        ['year' => '2016', 'red_text' => '2016 Milestone', 'grey_text' => '24/7 Support Launched', 'heading' => 'Crisis & Opportunity', 'image_url' => 'intime-09.jpg', 'text' => 'Our support works around the clock to ensure your business operations are secure, resilient, and monitored safely.'],
+        ['year' => '2017', 'red_text' => '2017 Milestone', 'grey_text' => '50+ Nationwide Branches', 'heading' => '50+ Branches Milestone', 'image_url' => 'intime-01.jpg', 'text' => 'We cross industries and provide services to almost every business either as a co-managed or supplemental asset.'],
+        ['year' => '2019', 'red_text' => '2019 Milestone', 'grey_text' => 'Global Market Entry', 'heading' => '100+ Global Branches', 'image_url' => 'intime-04.jpg', 'text' => 'Providing consulting expertise on vendor technology, IT budget strategy, and multi-cloud enterprise security.'],
+        ['year' => '2021', 'red_text' => '2021 Milestone', 'grey_text' => 'Top Enterprise Award', 'heading' => 'Industry Excellence Award', 'image_url' => 'intime-10.jpg', 'text' => 'Our team is held to the highest level of accountability to ensure exceptional satisfaction and proven results.'],
+    ];
+}
+
+function pickHistoryImage($item, $fallback) {
+    $image = $item['image_preview'] ?? $item['image_url'] ?? $item['image'] ?? $item['img'] ?? $fallback;
+    if (is_array($image)) {
+        $image = $image['url'] ?? $image['path'] ?? $image['relative_url'] ?? $image['src'] ?? $fallback;
+    }
+    return $image;
+}
+
+function normalizeCompanyHistoryContent($content) {
+    if (!is_array($content)) $content = [];
+    $defaults = defaultCompanyHistoryYears();
+    $legacy = isset($content['eyebrow'], $content['subheading']) && !isset($content['text']) && !isset($content['years']);
+    $list = [];
+    if (isset($content['years']) && is_array($content['years']) && count($content['years'])) {
+        $list = $content['years'];
+    } elseif (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
+        $list = $content['items'];
+    } elseif (isset($content['milestones']) && is_array($content['milestones']) && count($content['milestones'])) {
+        $list = $content['milestones'];
+    }
+    $years = [];
+    for ($i = 0; $i < 6; $i++) {
+        $item = is_array($list[$i] ?? null) ? $list[$i] : [];
+        $n = $i + 1;
+        $fallback = $defaults[$i];
+        $redText = $content["year_{$n}_red_text"] ?? $item['red_text'] ?? $item['milestone'] ?? $item['badge'] ?? (isset($item['year']) ? $item['year'] . ' Milestone' : $fallback['red_text']);
+        $year = $content["year_{$n}"] ?? $item['year'] ?? $fallback['year'];
+        $years[] = [
+            'year'      => $year,
+            'red_text'  => $redText,
+            'grey_text' => $content["year_{$n}_grey_text"] ?? $item['grey_text'] ?? $item['highlight'] ?? $item['caption'] ?? $fallback['grey_text'],
+            'heading'   => $content["year_{$n}_heading"] ?? $item['heading'] ?? $item['title'] ?? $fallback['heading'],
+            'image_url' => pickHistoryImage(array_merge($item, [
+                'image_preview' => $content["year_{$n}_image_preview"] ?? ($item['image_preview'] ?? null),
+                'image_url'     => $content["year_{$n}_image"] ?? $content["year_{$n}_image_url"] ?? ($item['image_url'] ?? null),
+            ]), $fallback['image_url']),
+            'text'      => $content["year_{$n}_text"] ?? $item['text'] ?? $item['desc'] ?? $item['description'] ?? $fallback['text'],
+        ];
+    }
+    return [
+        'subheading' => $legacy ? ($content['eyebrow'] ?? 'OUR JOURNEY') : ($content['subheading'] ?? $content['eyebrow'] ?? 'OUR JOURNEY'),
+        'heading'    => $content['heading'] ?? 'Our Company History',
+        'text'       => $legacy ? ($content['subheading'] ?? '') : ($content['text'] ?? 'A decade of growth, innovation, and unwavering commitment to client success.'),
+        'years'      => $years,
+    ];
+}
+
+function ensureCompanyHistorySection(&$content) {
+    $source = $content['Company History'] ?? null;
+    if ($source === null) return false;
+    $normalized = normalizeCompanyHistoryContent(is_array($source) ? $source : []);
+    $changed = json_encode($content['Company History']) !== json_encode($normalized);
+    $content['Company History'] = $normalized;
+    return $changed;
+}
+
 $pdo = getPdoConnection($DB_HOST, $DB_NAME, $DB_USER, $DB_PASS);
 
 // --------------------------------------------------------------------------
@@ -416,7 +483,7 @@ if ($pdo) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
-            if (ensureWhatWeDoSection($content) || ensureAboutSection($content)) {
+            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content)) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
