@@ -65,6 +65,8 @@ const Home = () => {
   const heroReady = contentReady || Boolean(heroData);
   const whatWeDoData = sectionsMap['whatwedo'] || sectionsMap['featurescarousel'] || sectionsMap['features'];
   const isWhatWeDoPreview = targetSection === 'whatwedo' || targetSection === 'featurescarousel' || targetSection === 'features';
+  const aboutData = sectionsMap['aboutsection'] || sectionsMap['about'] || sectionsMap['aboutus'];
+  const isAboutPreview = targetSection === 'aboutsection' || targetSection === 'about' || targetSection === 'aboutus' || targetSection.includes('about');
 
   useEffect(() => {
     // ── Skip API fetch in iframe preview mode ─────────────────────────────────
@@ -124,7 +126,7 @@ const Home = () => {
       <div className="bg-white min-h-screen p-2 font-sans selection:bg-[#C8102E] selection:text-white">
         { (targetSection.includes('hero') || targetSection.includes('slider')) && <HeroSlider data={heroData} ready={heroReady} /> }
         { isWhatWeDoPreview && <WhatWeDo data={whatWeDoData} /> }
-        { targetSection.includes('about') && <AboutSection data={sectionsMap['aboutsection'] || sectionsMap['about']} /> }
+        { isAboutPreview && <AboutSection data={aboutData} /> }
         { (targetSection.includes('history') || targetSection.includes('company')) && <CompanyHistory data={sectionsMap['companyhistory'] || sectionsMap['history']} /> }
         { (targetSection.includes('service') || targetSection.includes('featuredservices')) && <FeaturedServices data={sectionsMap['featuredservices'] || sectionsMap['services']} /> }
         { (targetSection.includes('annual') || targetSection.includes('progression')) && <AnnualProgression data={sectionsMap['annualprogression'] || sectionsMap['progression']} /> }
@@ -145,7 +147,7 @@ const Home = () => {
       <main>
         <HeroSlider data={heroData} ready={heroReady} />
         <WhatWeDo data={whatWeDoData} />
-        <AboutSection data={sectionsMap['aboutsection'] || sectionsMap['about']} />
+        <AboutSection data={aboutData} />
         <CompanyHistory data={sectionsMap['companyhistory'] || sectionsMap['history']} />
         <FeaturedServices data={sectionsMap['featuredservices'] || sectionsMap['services']} />
         <AnnualProgression data={sectionsMap['annualprogression'] || sectionsMap['progression']} />

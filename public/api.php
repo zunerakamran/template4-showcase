@@ -154,6 +154,52 @@ function ensureWhatWeDoSection(&$content) {
     return $changed;
 }
 
+function defaultAboutGauges() {
+    return [
+        ['value' => '50%', 'label' => 'Business strategy growth'],
+        ['value' => '75%', 'label' => 'Finance valuable ideas'],
+    ];
+}
+
+function normalizeAboutContent($content) {
+    if (!is_array($content)) $content = [];
+    $defaults = defaultAboutGauges();
+    $list = [];
+    if (isset($content['gauges']) && is_array($content['gauges']) && count($content['gauges'])) {
+        $list = $content['gauges'];
+    } elseif (isset($content['stats']) && is_array($content['stats']) && count($content['stats'])) {
+        $list = $content['stats'];
+    }
+    $gauges = [];
+    for ($i = 0; $i < 2; $i++) {
+        $item = $list[$i] ?? [];
+        $fallback = $defaults[$i];
+        $gauges[] = [
+            'value' => $item['value'] ?? $item['pct'] ?? $fallback['value'],
+            'label' => $item['label'] ?? $item['heading'] ?? $fallback['label'],
+        ];
+    }
+    return [
+        'eyebrow'          => $content['eyebrow'] ?? 'ABOUT US',
+        'heading'          => $content['heading'] ?? 'Why will you choose our?',
+        'subheading'       => $content['subheading'] ?? 'Our agency can only be as strong as our people & because of this, our team have designed game changing products.',
+        'text'             => $content['text'] ?? "Intime is a design studio founded in London. Nowadays, we've grown and expanded our services, and have become a multinational firm, offering a variety of services and solutions Worldwide.",
+        'image_url'        => $content['image_url'] ?? $content['image'] ?? $content['img'] ?? 'intime-04.jpg',
+        'experience_years' => $content['experience_years'] ?? $content['years'] ?? '10+',
+        'experience_label' => $content['experience_label'] ?? 'Years of Experience',
+        'gauges'           => $gauges,
+    ];
+}
+
+function ensureAboutSection(&$content) {
+    $source = $content['About Section'] ?? null;
+    if ($source === null) return false;
+    $normalized = normalizeAboutContent(is_array($source) ? $source : []);
+    $changed = json_encode($content['About Section']) !== json_encode($normalized);
+    $content['About Section'] = $normalized;
+    return $changed;
+}
+
 $pdo = getPdoConnection($DB_HOST, $DB_NAME, $DB_USER, $DB_PASS);
 
 // --------------------------------------------------------------------------
@@ -350,7 +396,7 @@ if ($pdo) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
-            if (ensureWhatWeDoSection($content)) {
+            if (ensureWhatWeDoSection($content) || ensureAboutSection($content)) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
