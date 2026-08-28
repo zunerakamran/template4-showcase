@@ -20,7 +20,7 @@ const filenameMap = Object.fromEntries(
  * - Falls back to placeholder.png if not found.
  */
 export const getLocalImg = (url) => {
-  if (!url) return images.placeholder;
+  if (!url) return images.intime08 || images.placeholder;
   if (url.startsWith('data:') || url.startsWith('blob:')) return url;
   if (url.startsWith('http://') || url.startsWith('https://')) return url;
   const filename = url.split('/').pop().split('?')[0];
