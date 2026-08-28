@@ -1,0 +1,344 @@
+<?php
+// Enable CORS
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-API-Key, X-Requested-With');
+
+// Handle preflight OPTIONS request
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
+header('Content-Type: application/json');
+
+// --------------------------------------------------------------------------
+// SHOWCASE CONFIGURATION
+// This api.php belongs to the SHOWCASE version of template4.
+// It uses its OWN dedicated database — completely separate from advisor DBs.
+// 1. Secret API Key: Set to match cpanel_api_key in Laravel Dashboard.
+// 2. MySQL Database Settings: Fill with your main cPanel MySQL DB credentials.
+// --------------------------------------------------------------------------
+$SECRET_API_KEY = "YOUR_SECRET_KEY";
+
+$DB_HOST = "localhost";
+$DB_NAME = "devznrepats_compliance_database";
+$DB_USER = "devznrepats_compliance_database_user";
+$DB_PASS = "cd8jtxl3.JTi";
+
+// File fallback path (showcase-specific)
+$dataDir  = __DIR__ . '/data';
+$dataFile = $dataDir . '/showcase-content.json';
+
+// Helper: Establish PDO MySQL Connection & Auto-Create Tables with Initial Seeding
+function getPdoConnection($host, $name, $user, $pass) {
+    if (empty($host) || empty($name) || empty($user) || $host === "YOUR_DB_HOST" || $name === "YOUR_SHOWCASE_DB_NAME") return null;
+    try {
+        $pdo = new PDO("mysql:host={$host};dbname={$name};charset=utf8mb4", $user, $pass, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+        ]);
+
+        // Use Laravel backend sections table structure
+        // The table already exists in the Laravel backend database
+
+        // Auto-create site_settings table
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `site_settings` (
+            `setting_key` VARCHAR(100) PRIMARY KEY,
+            `setting_value` TEXT NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+        // ── LARAVEL BACKEND INTEGRATION ─────────────────────────────────────────
+        // Fetch content from Laravel backend's sections table where advisor_id IS NULL
+        // This connects to the same database used by the content-flow-backend
+        // ─────────────────────────────────────────────────────────────────────
+
+        return $pdo;
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+function decodeDummyContent($raw) {
+    if (!$raw) return [];
+    if (is_array($raw)) return $raw;
+    $decoded = json_decode($raw, true);
+    return is_array($decoded) ? $decoded : [];
+}
+
+function loadSeedDummyContent($slug) {
+    $path = __DIR__ . '/data/' . preg_replace('/[^a-z0-9_-]/i', '', $slug) . '-dummy-content.json';
+    if (!file_exists($path)) {
+        $path = __DIR__ . '/data/template4-dummy-content.json';
+    }
+    if (!file_exists($path)) return [];
+    return json_decode(file_get_contents($path), true) ?: [];
+}
+
+function dummyToSections($content) {
+    $sections = [];
+    $list = [];
+    foreach ($content as $name => $secContent) {
+        $cnt = is_string($secContent) ? (json_decode($secContent, true) ?: $secContent) : $secContent;
+        $sections[$name] = $cnt;
+        $list[] = ['name' => $name, 'content' => $cnt];
+    }
+    return [$sections, $list];
+}
+
+$pdo = getPdoConnection($DB_HOST, $DB_NAME, $DB_USER, $DB_PASS);
+
+// --------------------------------------------------------------------------
+// POST REQUEST: SYNC CONTENT FROM LARAVEL BACKEND
+// --------------------------------------------------------------------------
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $rawInput = file_get_contents('php://input');
+    $input = json_decode($rawInput, true);
+
+    if (!$input) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Invalid JSON payload']);
+        exit;
+    }
+
+    // Validate Secret API Key (if configured)
+    if (!empty($SECRET_API_KEY) && $SECRET_API_KEY !== "YOUR_SECRET_KEY") {
+        $providedKey = $input['api_key'] 
+            ?? $_SERVER['HTTP_X_API_KEY'] 
+            ?? null;
+
+        if (!$providedKey && isset($_SERVER['HTTP_AUTHORIZATION'])) {
+            if (preg_match('/Bearer\s+(.*)$/i', $_SERVER['HTTP_AUTHORIZATION'], $matches)) {
+                $providedKey = $matches[1];
+            }
+        }
+
+        if ($providedKey !== $SECRET_API_KEY) {
+            http_response_code(401);
+            echo json_encode([
+                'status'  => 'error', 
+                'message' => 'Unauthorized: Invalid API Key. Provided key does not match cPanel secret key.'
+            ]);
+            exit;
+        }
+    }
+
+    $updatedSectionsCount = 0;
+
+    // 1. Sync to MySQL Database Tables if PDO connection active
+    if ($pdo) {
+        if (!empty($input['primary_color'])) {
+            $stmt = $pdo->prepare("REPLACE INTO site_settings (setting_key, setting_value) VALUES ('primary_color', ?)");
+            $stmt->execute([$input['primary_color']]);
+        }
+        if (!empty($input['secondary_color'])) {
+            $stmt = $pdo->prepare("REPLACE INTO site_settings (setting_key, setting_value) VALUES ('secondary_color', ?)");
+            $stmt->execute([$input['secondary_color']]);
+        }
+        if (!empty($input['logo_url'])) {
+            $stmt = $pdo->prepare("REPLACE INTO site_settings (setting_key, setting_value) VALUES ('logo_url', ?)");
+            $stmt->execute([$input['logo_url']]);
+        }
+
+        if (isset($input['sections']) && is_array($input['sections'])) {
+            $stmt = $pdo->prepare("INSERT INTO sections (section_name, content) VALUES (?, ?) ON DUPLICATE KEY UPDATE content = VALUES(content)");
+            foreach ($input['sections'] as $newSec) {
+                $name    = $newSec['name'] ?? null;
+                $content = $newSec['content'] ?? null;
+                if ($name && $content) {
+                    $jsonStr = is_string($content) ? $content : json_encode($content, JSON_UNESCAPED_UNICODE);
+                    $stmt->execute([$name, $jsonStr]);
+                    $updatedSectionsCount++;
+                }
+            }
+        }
+    }
+
+    // 2. Also Sync to JSON File for fallback reliability
+    if (!file_exists($dataDir)) mkdir($dataDir, 0755, true);
+    $existing = file_exists($dataFile) ? (json_decode(file_get_contents($dataFile), true) ?: []) : [];
+
+    if (!empty($input['primary_color']))   $existing['primary_color']   = $input['primary_color'];
+    if (!empty($input['secondary_color'])) $existing['secondary_color'] = $input['secondary_color'];
+    if (!empty($input['logo_url']))        $existing['logo_url']        = $input['logo_url'];
+
+    if (!isset($existing['sections']) || !is_array($existing['sections'])) {
+        $existing['sections'] = [];
+    }
+
+    if (isset($input['sections']) && is_array($input['sections'])) {
+        foreach ($input['sections'] as $newSec) {
+            $name    = $newSec['name'] ?? null;
+            $content = $newSec['content'] ?? null;
+            if ($name && $content) {
+                $parsedContent = is_string($content) ? (json_decode($content, true) ?: $content) : $content;
+                $existing['sections'][$name] = $parsedContent;
+                if (!$pdo) $updatedSectionsCount++;
+            }
+        }
+    }
+
+    file_put_contents($dataFile, json_encode($existing, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+    http_response_code(200);
+    echo json_encode([
+        'status'        => 'success',
+        'message'       => 'Showcase content successfully updated on cPanel MySQL DB & JSON file!',
+        'db_active'     => (bool)$pdo,
+        'updated_count' => $updatedSectionsCount,
+        'data'          => $existing
+    ]);
+    exit;
+}
+
+// --------------------------------------------------------------------------
+// GET REQUEST: SERVE LIVE SHOWCASE CONTENT FOR REACT TEMPLATE
+// Called with ?showcase=1&slug=template4 from the React frontend.
+// Primary source: Laravel `templates.dummy_content` (edit this JSON in MySQL).
+// Fallbacks: local `sections` table, then JSON file.
+// --------------------------------------------------------------------------
+$slug = $_GET['slug'] ?? 'template4';
+$slug = preg_replace('/[^a-z0-9_-]/i', '', $slug) ?: 'template4';
+
+$result = [
+    'primary_color'   => '#0B1B3D',
+    'secondary_color' => '#C8102E',
+    'logo_url'        => '/assets/intime/logo-dark.png',
+    'sections'        => [],
+    'sections_list'   => [],
+    'content_source'  => 'empty'
+];
+
+if ($pdo) {
+    try {
+        $settingsStmt = $pdo->query("SELECT setting_key, setting_value FROM site_settings");
+        while ($row = $settingsStmt->fetch()) {
+            $result[$row['setting_key']] = $row['setting_value'];
+        }
+    } catch (Exception $e) {
+        // site_settings is optional
+    }
+
+    // 1. Primary: templates.dummy_content (central Laravel catalog)
+    try {
+        $tplStmt = $pdo->prepare("SELECT dummy_content FROM templates WHERE slug = ? LIMIT 1");
+        $tplStmt->execute([$slug]);
+        $tplRow = $tplStmt->fetch();
+        if ($tplRow) {
+            $content = decodeDummyContent($tplRow['dummy_content']);
+            $seed = loadSeedDummyContent($slug);
+            $heroHasLists = isset($content['Hero Slider']['slides']) && is_array($content['Hero Slider']['slides']);
+            
+            // Force update hero slider to new slides structure
+            if (isset($content['Hero Slider']) && !$heroHasLists) {
+                $oldHero = $content['Hero Slider'];
+                if (is_array($oldHero) && !isset($oldHero['slides']) && (isset($oldHero['heading']) || isset($oldHero['eyebrow']))) {
+                    // Migrate old structure to new slides structure
+                    $newHeroSlider = [
+                        'slides' => [
+                            [
+                                'id' => 1,
+                                'bg' => $oldHero['image_url'] ?? 'https://images.unsplash.com/photo-1551836022-d5d88e9218df?w=800&auto=format&fit=crop&q=80',
+                                'eyebrow' => $oldHero['eyebrow'] ?? 'FINANCIAL CENTRE & WEALTH MANAGEMENT',
+                                'heading' => $oldHero['heading'] ?? 'Strategic Advisory for Long-Term Growth',
+                                'subheading' => $oldHero['subheading'] ?? 'Customized financial planning, investment strategies, and fiduciary advice for leaders and families.',
+                                'text' => $oldHero['text'] ?? 'We partner with you to navigate complex economic landscapes with confidence.',
+                                'button_text' => $oldHero['button_text'] ?? 'GET IN TOUCH',
+                                'button_url' => $oldHero['button_url'] ?? '#appointment',
+                                'youtube_url' => 'https://www.youtube.com/watch?v=SF4aHwxHtZ0'
+                            ],
+                            [
+                                'id' => 2,
+                                'bg' => 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?w=800&auto=format&fit=crop&q=80',
+                                'eyebrow' => 'FINANCIAL CENTRE & WEALTH MANAGEMENT',
+                                'heading' => 'We do the best thing for market funding',
+                                'subheading' => 'High-impact financial solutions: institutional-grade portfolio management and risk mitigation strategies.',
+                                'text' => 'Our team delivers proven results through disciplined investment approaches.',
+                                'button_text' => 'GET IN TOUCH',
+                                'button_url' => '#appointment',
+                                'youtube_url' => 'https://www.youtube.com/watch?v=SF4aHwxHtZ0'
+                            ],
+                            [
+                                'id' => 3,
+                                'bg' => 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=800&auto=format&fit=crop&q=80',
+                                'eyebrow' => 'FINANCIAL CENTRE & WEALTH MANAGEMENT',
+                                'heading' => 'We have to do business for your satisfaction',
+                                'subheading' => 'Building lasting relationships through transparent communication and exceptional service.',
+                                'text' => 'Your financial success is our primary mission and commitment.',
+                                'button_text' => 'GET IN TOUCH',
+                                'button_url' => '#appointment',
+                                'youtube_url' => 'https://www.youtube.com/watch?v=SF4aHwxHtZ0'
+                            ]
+                        ]
+                    ];
+                    $content['Hero Slider'] = $newHeroSlider;
+                    $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
+                    $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
+                }
+            }
+            
+            if ($seed && !$heroHasLists && !isset($content['Hero Slider']['slides'])) {
+                $content = array_replace_recursive($seed, $content);
+                $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
+                $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
+            }
+            if (!empty($content)) {
+                [$result['sections'], $result['sections_list']] = dummyToSections($content);
+                $result['content_source'] = 'templates.dummy_content';
+            }
+        }
+    } catch (Exception $e) {
+        // templates table may not exist on older DBs
+    }
+}
+
+// 2. Fetch from Laravel backend sections table (advisor_id IS NULL for showcase)
+if (empty($result['sections']) && $pdo) {
+    try {
+        // Get the home page ID
+        $pageStmt = $pdo->prepare("SELECT id FROM pages WHERE slug = 'home' LIMIT 1");
+        $pageStmt->execute();
+        $pageRow = $pageStmt->fetch();
+        
+        if ($pageRow) {
+            $pageId = $pageRow['id'];
+            // Fetch sections where advisor_id IS NULL (showcase content)
+            $secStmt = $pdo->prepare("SELECT name, content FROM sections WHERE page_id = ? AND advisor_id IS NULL ORDER BY id ASC");
+            $secStmt->execute([$pageId]);
+            
+            while ($row = $secStmt->fetch()) {
+                $name = $row['name'];
+                $cnt  = json_decode($row['content'], true) ?: $row['content'];
+                $result['sections'][$name] = $cnt;
+                $result['sections_list'][] = ['name' => $name, 'content' => $cnt];
+            }
+            if (!empty($result['sections'])) {
+                $result['content_source'] = 'laravel_backend_sections';
+            }
+        }
+    } catch (Exception $e) {
+        // Fallback to json if DB query fails
+    }
+}
+
+// 3. Fallback to JSON File if MySQL was empty or disabled
+if (empty($result['sections']) && file_exists($dataFile)) {
+    $fileData = json_decode(file_get_contents($dataFile), true) ?: [];
+    if (!empty($fileData['primary_color']))   $result['primary_color']   = $fileData['primary_color'];
+    if (!empty($fileData['secondary_color'])) $result['secondary_color'] = $fileData['secondary_color'];
+    if (!empty($fileData['logo_url']))        $result['logo_url']        = $fileData['logo_url'];
+
+    if (isset($fileData['sections']) && is_array($fileData['sections'])) {
+        $result['sections'] = $fileData['sections'];
+        foreach ($fileData['sections'] as $secName => $secContent) {
+            $result['sections_list'][] = [
+                'name'    => $secName,
+                'content' => is_string($secContent) ? json_decode($secContent, true) ?: $secContent : $secContent
+            ];
+        }
+        $result['content_source'] = 'json_file';
+    }
+}
+
+echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+exit;
