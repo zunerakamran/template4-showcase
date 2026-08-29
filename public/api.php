@@ -301,7 +301,6 @@ function defaultFeaturedServiceBoxes() {
 function normalizeFeaturedServicesContent($content) {
     if (!is_array($content)) $content = [];
     $defaults = defaultFeaturedServiceBoxes();
-    $legacy = isset($content['eyebrow'], $content['subheading']) && !isset($content['text']) && !isset($content['boxes']);
     $list = [];
     if (isset($content['boxes']) && is_array($content['boxes']) && count($content['boxes'])) {
         $list = $content['boxes'];
@@ -321,9 +320,9 @@ function normalizeFeaturedServicesContent($content) {
         ];
     }
     return [
-        'subheading' => $legacy ? ($content['eyebrow'] ?? 'FEATURED SERVICES') : ($content['subheading'] ?? $content['eyebrow'] ?? 'FEATURED SERVICES'),
+        'subheading' => $content['subheading'] ?? 'FEATURED SERVICES',
         'heading'    => $content['heading'] ?? 'We help to get Solutions!',
-        'text'       => $legacy ? ($content['subheading'] ?? '') : ($content['text'] ?? 'Provide users with appropriate view and access permissions to requests, problems, changes, contracts, assets, solutions'),
+        'text'       => $content['text'] ?? 'Provide users with appropriate view and access permissions to requests, problems, changes, contracts, assets, solutions',
         'boxes'      => $boxes,
     ];
 }
