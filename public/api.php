@@ -578,6 +578,62 @@ function ensureCounterStatsSection(&$content) {
     return $changed;
 }
 
+function defaultTestimonialItems() {
+    return [
+        ['quote' => 'Working with several word press themes and templates the last years, I only can say this is the best in every level. I use it for my company and the reviews that I have already are all excellent.', 'name' => 'Alina Lora', 'role' => 'Former Manager, Intime', 'image_url' => 'testimonial-01.jpg'],
+        ['quote' => 'This is one of the BEST THEMES I have ever worked with. The extra bells and whistles added to it are amazing. Elementor features add extra flavor. The customer support is very responsive.', 'name' => 'Rohan Jho', 'role' => 'Former Manager, Intime', 'image_url' => 'testimonial-02.jpg'],
+        ['quote' => 'Great theme, one of the best I have worked with in a while. Full featured and great support for the minor issues I had which were really my not being skilled/experienced enough.', 'name' => 'Donald Frew', 'role' => 'Former Manager, Intime', 'image_url' => 'testimonial-03.jpg'],
+    ];
+}
+
+function pickTestimonialSideImage($content) {
+    $image = $content['image_preview'] ?? $content['image_url'] ?? $content['image'] ?? $content['img'] ?? $content['side_image'] ?? 'intime-17.jpg';
+    if (is_array($image)) {
+        $image = $image['url'] ?? $image['path'] ?? $image['relative_url'] ?? $image['src'] ?? 'intime-17.jpg';
+    }
+    return $image;
+}
+
+function normalizeTestimonialsContent($content) {
+    if (!is_array($content)) $content = [];
+    $defaults = defaultTestimonialItems();
+    $list = [];
+    if (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
+        $list = $content['items'];
+    } elseif (isset($content['testimonials']) && is_array($content['testimonials']) && count($content['testimonials'])) {
+        $list = $content['testimonials'];
+    }
+    $legacyThin = isset($content['eyebrow']) && isset($content['heading']) && !count($list);
+    $reviewsLabel = $content['reviews_label'] ?? $content['label'] ?? ($legacyThin && strlen($content['subheading'] ?? '') > 40 ? 'Clients Reviews:' : ($content['subheading'] ?? 'Clients Reviews:'));
+    $items = [];
+    for ($i = 0; $i < 3; $i++) {
+        $item = is_array($list[$i] ?? null) ? $list[$i] : [];
+        $fallback = $defaults[$i];
+        $items[] = [
+            'quote'     => $item['quote'] ?? $item['text'] ?? $item['review'] ?? $fallback['quote'],
+            'name'      => $item['name'] ?? $item['title'] ?? $item['author'] ?? $fallback['name'],
+            'role'      => $item['role'] ?? $item['position'] ?? $item['job'] ?? $item['desc'] ?? $fallback['role'],
+            'image_url' => $item['image_url'] ?? $item['image'] ?? $item['img'] ?? $item['avatar'] ?? $fallback['image_url'],
+        ];
+    }
+    return [
+        'eyebrow'    => $content['eyebrow'] ?? $content['tagline'] ?? "CLIENT'S TESTIMONIALS",
+        'heading'    => $content['heading'] ?? "We are Very Happy to Get Our Client's Reviews.",
+        'subheading' => $reviewsLabel,
+        'image_url'  => pickTestimonialSideImage($content),
+        'items'      => $items,
+    ];
+}
+
+function ensureTestimonialsSection(&$content) {
+    $source = $content['Testimonials Carousel'] ?? null;
+    if ($source === null) return false;
+    $normalized = normalizeTestimonialsContent(is_array($source) ? $source : []);
+    $changed = json_encode($content['Testimonials Carousel']) !== json_encode($normalized);
+    $content['Testimonials Carousel'] = $normalized;
+    return $changed;
+}
+
 $pdo = getPdoConnection($DB_HOST, $DB_NAME, $DB_USER, $DB_PASS);
 
 // --------------------------------------------------------------------------
@@ -774,7 +830,7 @@ if ($pdo) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
-            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content) || ensureAnnualProgressionSection($content) || ensurePortfolioSection($content) || ensureBranchesSection($content) || ensureCounterStatsSection($content)) {
+            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content) || ensureAnnualProgressionSection($content) || ensurePortfolioSection($content) || ensureBranchesSection($content) || ensureCounterStatsSection($content) || ensureTestimonialsSection($content)) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
