@@ -336,6 +336,84 @@ function ensureFeaturedServicesSection(&$content) {
     return $changed;
 }
 
+function parseProgressPct($value, $fallback) {
+    if (is_numeric($value)) return max(0, min(100, (int)$value));
+    if (is_string($value) && preg_match('/(\d+)/', $value, $m)) {
+        return max(0, min(100, (int)$m[1]));
+    }
+    return $fallback;
+}
+
+function defaultAnnualProgressionBars() {
+    return [
+        ['label' => 'Business growth', 'year' => '2018', 'pct' => 70],
+        ['label' => 'Investment growth', 'year' => '2019', 'pct' => 80],
+        ['label' => 'Financial growth', 'year' => '2020', 'pct' => 90],
+    ];
+}
+
+function defaultAnnualProgressionHighlights() {
+    return [
+        ['icon' => 'shield-alt', 'heading' => 'Risk Free', 'text' => 'We offer risk free business for tension free life.'],
+        ['icon' => 'chart-line', 'heading' => 'Business Growth', 'text' => 'We ensure the business growth without conditions.'],
+    ];
+}
+
+function normalizeAnnualProgressionContent($content) {
+    if (!is_array($content)) $content = [];
+    $legacy = isset($content['eyebrow'], $content['subheading']) && !isset($content['text']);
+    $barDefaults = defaultAnnualProgressionBars();
+    $highlightDefaults = defaultAnnualProgressionHighlights();
+    $barList = [];
+    if (isset($content['bars']) && is_array($content['bars']) && count($content['bars'])) {
+        $barList = $content['bars'];
+    } elseif (isset($content['progress']) && is_array($content['progress']) && count($content['progress'])) {
+        $barList = $content['progress'];
+    }
+    $highlightList = [];
+    if (isset($content['highlights']) && is_array($content['highlights']) && count($content['highlights'])) {
+        $highlightList = $content['highlights'];
+    } elseif (isset($content['features']) && is_array($content['features']) && count($content['features'])) {
+        $highlightList = $content['features'];
+    }
+    $bars = [];
+    for ($i = 0; $i < 3; $i++) {
+        $item = is_array($barList[$i] ?? null) ? $barList[$i] : [];
+        $fallback = $barDefaults[$i];
+        $bars[] = [
+            'label' => $item['label'] ?? $item['heading'] ?? $item['title'] ?? $fallback['label'],
+            'year'  => $item['year'] ?? $fallback['year'],
+            'pct'   => parseProgressPct($item['pct'] ?? $item['percent'] ?? $item['value'] ?? $item['percentage'] ?? null, $fallback['pct']),
+        ];
+    }
+    $highlights = [];
+    for ($i = 0; $i < 2; $i++) {
+        $item = is_array($highlightList[$i] ?? null) ? $highlightList[$i] : [];
+        $fallback = $highlightDefaults[$i];
+        $highlights[] = [
+            'icon'    => $item['icon'] ?? $fallback['icon'],
+            'heading' => $item['heading'] ?? $item['title'] ?? $fallback['heading'],
+            'text'    => $item['text'] ?? $item['desc'] ?? $item['description'] ?? $fallback['text'],
+        ];
+    }
+    return [
+        'subheading' => $legacy ? ($content['eyebrow'] ?? 'ANNUAL PROGRESSION') : ($content['subheading'] ?? $content['eyebrow'] ?? 'ANNUAL PROGRESSION'),
+        'heading'    => $content['heading'] ?? 'Our Business Growth is Really Incredible!',
+        'text'       => $legacy ? ($content['subheading'] ?? '') : ($content['text'] ?? 'We love what we do and we do it with passion. We value the experimentation, the reformation of the message, and the smart incentives.'),
+        'bars'       => $bars,
+        'highlights' => $highlights,
+    ];
+}
+
+function ensureAnnualProgressionSection(&$content) {
+    $source = $content['Annual Progression'] ?? null;
+    if ($source === null) return false;
+    $normalized = normalizeAnnualProgressionContent(is_array($source) ? $source : []);
+    $changed = json_encode($content['Annual Progression']) !== json_encode($normalized);
+    $content['Annual Progression'] = $normalized;
+    return $changed;
+}
+
 $pdo = getPdoConnection($DB_HOST, $DB_NAME, $DB_USER, $DB_PASS);
 
 // --------------------------------------------------------------------------
@@ -532,7 +610,7 @@ if ($pdo) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
-            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content)) {
+            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content) || ensureAnnualProgressionSection($content)) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
