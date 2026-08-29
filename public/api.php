@@ -683,6 +683,47 @@ function ensureLatestNewsSection(&$content) {
     return $changed;
 }
 
+function defaultClientLogoItems() {
+    return [
+        ['name' => 'slack', 'image_url' => ''],
+        ['name' => 'Google', 'image_url' => ''],
+        ['name' => 'envato', 'image_url' => ''],
+        ['name' => 'Sketch', 'image_url' => ''],
+        ['name' => 'Figma', 'image_url' => ''],
+    ];
+}
+
+function normalizeClientLogosContent($content) {
+    if (!is_array($content)) $content = [];
+    $defaults = defaultClientLogoItems();
+    $list = [];
+    if (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
+        $list = $content['items'];
+    } elseif (isset($content['logos']) && is_array($content['logos']) && count($content['logos'])) {
+        $list = $content['logos'];
+    }
+    $items = [];
+    for ($i = 0; $i < 5; $i++) {
+        $raw = $list[$i] ?? null;
+        $item = is_string($raw) ? ['name' => $raw] : (is_array($raw) ? $raw : []);
+        $fallback = $defaults[$i];
+        $items[] = [
+            'name'      => $item['name'] ?? $item['label'] ?? $item['title'] ?? $item['text'] ?? $fallback['name'],
+            'image_url' => $item['image_url'] ?? $item['image'] ?? $item['img'] ?? $item['logo'] ?? $fallback['image_url'],
+        ];
+    }
+    return ['items' => $items];
+}
+
+function ensureClientLogosSection(&$content) {
+    $source = $content['Client Logos'] ?? null;
+    if ($source === null) return false;
+    $normalized = normalizeClientLogosContent(is_array($source) ? $source : []);
+    $changed = json_encode($content['Client Logos']) !== json_encode($normalized);
+    $content['Client Logos'] = $normalized;
+    return $changed;
+}
+
 $pdo = getPdoConnection($DB_HOST, $DB_NAME, $DB_USER, $DB_PASS);
 
 // --------------------------------------------------------------------------
@@ -879,7 +920,7 @@ if ($pdo) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
-            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content) || ensureAnnualProgressionSection($content) || ensurePortfolioSection($content) || ensureBranchesSection($content) || ensureCounterStatsSection($content) || ensureTestimonialsSection($content) || ensureLatestNewsSection($content)) {
+            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content) || ensureAnnualProgressionSection($content) || ensurePortfolioSection($content) || ensureBranchesSection($content) || ensureCounterStatsSection($content) || ensureTestimonialsSection($content) || ensureLatestNewsSection($content) || ensureClientLogosSection($content)) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
