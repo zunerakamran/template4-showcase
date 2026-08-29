@@ -287,6 +287,56 @@ function ensureCompanyHistorySection(&$content) {
     return $changed;
 }
 
+function defaultFeaturedServiceBoxes() {
+    return [
+        ['icon' => 'chart-pie', 'heading' => 'Strategy & Planning', 'text' => 'Collaborate Consulting exists to find the place where being seeming disparate interests meet.', 'button_text' => 'Read more', 'button_url' => '#service-strategy-planning'],
+        ['icon' => 'tasks', 'heading' => 'Program Manager', 'text' => 'Collaborate Consulting exists to find the place where being seeming disparate interests meet.', 'button_text' => 'Read more', 'button_url' => '#service-program-manager'],
+        ['icon' => 'landmark', 'heading' => 'Tax Management', 'text' => 'Collaborate Consulting exists to find the place where being seeming disparate interests meet.', 'button_text' => 'Read more', 'button_url' => '#service-tax-management'],
+        ['icon' => 'coins', 'heading' => 'Investment Policy', 'text' => 'Collaborate Consulting exists to find the place where being seeming disparate interests meet.', 'button_text' => 'Read more', 'button_url' => '#service-investment-policy'],
+        ['icon' => 'holding', 'heading' => 'Financial Advices', 'text' => 'Collaborate Consulting exists to find the place where being seeming disparate interests meet.', 'button_text' => 'Read more', 'button_url' => '#service-financial-advices'],
+        ['icon' => 'seedling', 'heading' => 'Business Growth Plan', 'text' => 'Collaborate Consulting exists to find the place where being seeming disparate interests meet.', 'button_text' => 'Read more', 'button_url' => '#service-business-growth-plan'],
+    ];
+}
+
+function normalizeFeaturedServicesContent($content) {
+    if (!is_array($content)) $content = [];
+    $defaults = defaultFeaturedServiceBoxes();
+    $legacy = isset($content['eyebrow'], $content['subheading']) && !isset($content['text']) && !isset($content['boxes']);
+    $list = [];
+    if (isset($content['boxes']) && is_array($content['boxes']) && count($content['boxes'])) {
+        $list = $content['boxes'];
+    } elseif (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
+        $list = $content['items'];
+    }
+    $boxes = [];
+    for ($i = 0; $i < 6; $i++) {
+        $item = is_array($list[$i] ?? null) ? $list[$i] : [];
+        $fallback = $defaults[$i];
+        $boxes[] = [
+            'icon'        => $item['icon'] ?? $fallback['icon'],
+            'heading'     => $item['heading'] ?? $item['title'] ?? $fallback['heading'],
+            'text'        => $item['text'] ?? $item['desc'] ?? $fallback['text'],
+            'button_text' => $item['button_text'] ?? $item['read_more'] ?? $fallback['button_text'],
+            'button_url'  => $item['button_url'] ?? $item['url'] ?? $item['link'] ?? (isset($item['slug']) ? '#service-' . $item['slug'] : $fallback['button_url']),
+        ];
+    }
+    return [
+        'subheading' => $legacy ? ($content['eyebrow'] ?? 'FEATURED SERVICES') : ($content['subheading'] ?? $content['eyebrow'] ?? 'FEATURED SERVICES'),
+        'heading'    => $content['heading'] ?? 'We help to get Solutions!',
+        'text'       => $legacy ? ($content['subheading'] ?? '') : ($content['text'] ?? 'Provide users with appropriate view and access permissions to requests, problems, changes, contracts, assets, solutions'),
+        'boxes'      => $boxes,
+    ];
+}
+
+function ensureFeaturedServicesSection(&$content) {
+    $source = $content['Featured Services'] ?? null;
+    if ($source === null) return false;
+    $normalized = normalizeFeaturedServicesContent(is_array($source) ? $source : []);
+    $changed = json_encode($content['Featured Services']) !== json_encode($normalized);
+    $content['Featured Services'] = $normalized;
+    return $changed;
+}
+
 $pdo = getPdoConnection($DB_HOST, $DB_NAME, $DB_USER, $DB_PASS);
 
 // --------------------------------------------------------------------------
@@ -483,7 +533,7 @@ if ($pdo) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
-            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content)) {
+            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content)) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
