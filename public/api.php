@@ -536,6 +536,48 @@ function ensureBranchesSection(&$content) {
     return $changed;
 }
 
+function defaultCounterStats() {
+    return [
+        ['icon' => 'users', 'value' => '2,800+', 'label' => 'Active Clients', 'sub' => 'Empowering businesses globally with passion and proven expertise.'],
+        ['icon' => 'star', 'value' => '1,670+', 'label' => '5-Star Reviews', 'sub' => 'Top customer satisfaction and unmatched quality of service.'],
+        ['icon' => 'user-tie', 'value' => '106+', 'label' => 'Team Members', 'sub' => 'Dedicated specialists and leaders driving continuous innovation.'],
+        ['icon' => 'award', 'value' => '99.8%', 'label' => 'Success Rate', 'sub' => 'Consistently delivering top-tier performance and business growth.'],
+    ];
+}
+
+function normalizeCounterStatsContent($content) {
+    if (!is_array($content)) $content = [];
+    $defaults = defaultCounterStats();
+    $list = [];
+    if (isset($content['stats']) && is_array($content['stats']) && count($content['stats'])) {
+        $list = $content['stats'];
+    } elseif (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
+        $list = $content['items'];
+    }
+    $stats = [];
+    for ($i = 0; $i < 4; $i++) {
+        $item = is_array($list[$i] ?? null) ? $list[$i] : [];
+        $fallback = $defaults[$i];
+        $n = $i + 1;
+        $stats[] = [
+            'icon'  => $item['icon'] ?? $content["stat_{$n}_icon"] ?? $fallback['icon'],
+            'value' => $item['value'] ?? $item['number'] ?? $content["stat_{$n}_value"] ?? $fallback['value'],
+            'label' => $item['label'] ?? $item['title'] ?? $item['heading'] ?? $content["stat_{$n}_label"] ?? $fallback['label'],
+            'sub'   => $item['sub'] ?? $item['desc'] ?? $item['description'] ?? $item['text'] ?? $content["stat_{$n}_sub"] ?? $fallback['sub'],
+        ];
+    }
+    return ['stats' => $stats];
+}
+
+function ensureCounterStatsSection(&$content) {
+    $source = $content['Counter Stats'] ?? null;
+    if ($source === null) return false;
+    $normalized = normalizeCounterStatsContent(is_array($source) ? $source : []);
+    $changed = json_encode($content['Counter Stats']) !== json_encode($normalized);
+    $content['Counter Stats'] = $normalized;
+    return $changed;
+}
+
 $pdo = getPdoConnection($DB_HOST, $DB_NAME, $DB_USER, $DB_PASS);
 
 // --------------------------------------------------------------------------
@@ -732,7 +774,7 @@ if ($pdo) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
-            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content) || ensureAnnualProgressionSection($content) || ensurePortfolioSection($content) || ensureBranchesSection($content)) {
+            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content) || ensureAnnualProgressionSection($content) || ensurePortfolioSection($content) || ensureBranchesSection($content) || ensureCounterStatsSection($content)) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
