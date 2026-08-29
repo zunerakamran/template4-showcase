@@ -473,6 +473,69 @@ function ensurePortfolioSection(&$content) {
     return $changed;
 }
 
+function defaultBranchItems() {
+    return [
+        ['name' => 'Sydney (Head Office)', 'address' => '1 Epping Road, North Ryde, NSW 2113', 'phone' => '+61 2 9870 7689', 'email' => 'email@example.com'],
+        ['name' => 'Brisbane', 'address' => 'Level 28, 400 George Street, Brisbane, QLD 4000', 'phone' => '+61 2 9870 7689', 'email' => 'email@example.com'],
+        ['name' => 'Hobart', 'address' => '85 Macquarie Finoa Street, Hobart, TAS 7000', 'phone' => '+61 2 9870 7689', 'email' => 'email@example.com'],
+        ['name' => 'Melbourne', 'address' => 'Level 5, 4 Freshwater Place, Southbank, VIC 3006', 'phone' => '+61 2 9870 7689', 'email' => 'email@example.com'],
+    ];
+}
+
+function pickBranchMapImage($content) {
+    $image = $content['image_preview'] ?? $content['map_image'] ?? $content['image_url'] ?? $content['image'] ?? $content['img'] ?? 'maps-point.png';
+    if (is_array($image)) {
+        $image = $image['url'] ?? $image['path'] ?? $image['relative_url'] ?? $image['src'] ?? 'maps-point.png';
+    }
+    return $image;
+}
+
+function normalizeBranchesContent($content) {
+    if (!is_array($content)) $content = [];
+    $legacyLabel = isset($content['eyebrow']);
+    $defaults = defaultBranchItems();
+    $list = [];
+    if (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
+        $list = $content['items'];
+    } elseif (isset($content['branches']) && is_array($content['branches']) && count($content['branches'])) {
+        $list = $content['branches'];
+    } elseif (isset($content['offices']) && is_array($content['offices']) && count($content['offices'])) {
+        $list = $content['offices'];
+    }
+    $items = [];
+    for ($i = 0; $i < 4; $i++) {
+        $item = is_array($list[$i] ?? null) ? $list[$i] : [];
+        $fallback = $defaults[$i];
+        $items[] = [
+            'name'    => $item['name'] ?? $item['heading'] ?? $item['title'] ?? $fallback['name'],
+            'address' => $item['address'] ?? $fallback['address'],
+            'phone'   => $item['phone'] ?? $item['tel'] ?? $fallback['phone'],
+            'email'   => $item['email'] ?? $fallback['email'],
+        ];
+    }
+    return [
+        'subheading'     => $legacyLabel ? ($content['eyebrow'] ?? 'GET IN TOUCH') : ($content['subheading'] ?? 'GET IN TOUCH'),
+        'heading'        => $content['heading'] ?? 'We are Connected All Time to Help Your Business!',
+        'text'           => $legacyLabel ? ($content['text'] ?? $content['subheading'] ?? 'We understand the importance of approaching each work integrally and believe in the power of simple and easy communication.') : ($content['text'] ?? 'We understand the importance of approaching each work integrally and believe in the power of simple and easy communication.'),
+        'form_heading'   => $content['form_heading'] ?? 'Book an appionment',
+        'button_text'    => $content['button_text'] ?? 'SEND YOUR MESSAGE',
+        'branches_label' => $content['branches_label'] ?? 'Main Branches:',
+        'stat_value'     => $content['stat_value'] ?? '12+',
+        'stat_label'     => $content['stat_label'] ?? 'Branches',
+        'map_image'      => pickBranchMapImage($content),
+        'items'          => $items,
+    ];
+}
+
+function ensureBranchesSection(&$content) {
+    $source = $content['Branches and Appointment'] ?? null;
+    if ($source === null) return false;
+    $normalized = normalizeBranchesContent(is_array($source) ? $source : []);
+    $changed = json_encode($content['Branches and Appointment']) !== json_encode($normalized);
+    $content['Branches and Appointment'] = $normalized;
+    return $changed;
+}
+
 $pdo = getPdoConnection($DB_HOST, $DB_NAME, $DB_USER, $DB_PASS);
 
 // --------------------------------------------------------------------------
@@ -669,7 +732,7 @@ if ($pdo) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
-            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content) || ensureAnnualProgressionSection($content) || ensurePortfolioSection($content)) {
+            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content) || ensureAnnualProgressionSection($content) || ensurePortfolioSection($content) || ensureBranchesSection($content)) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
