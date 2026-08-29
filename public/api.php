@@ -634,6 +634,55 @@ function ensureTestimonialsSection(&$content) {
     return $changed;
 }
 
+function defaultLatestNewsItems() {
+    return [
+        ['date' => '10', 'month' => 'Nov, 20', 'author' => 'John Doe', 'cat' => 'Consulting', 'title' => 'We would love to share a similar experience', 'excerpt' => 'The theory was first published in 2008 a press released under the name of Cliff Arnall, who at the time was a tutor at the…', 'image_url' => 'intime-03.jpg', 'button_text' => 'Read more', 'button_url' => '#news'],
+        ['date' => '06', 'month' => 'Nov, 20', 'author' => 'John Doe', 'cat' => 'HR Consulting', 'title' => 'We glad to discuss your organisation situation.', 'excerpt' => 'The theory was first published in 2008 a press released under the name of Cliff Arnall, who at the time was a tutor at the…', 'image_url' => 'intime-02.jpg', 'button_text' => 'Read more', 'button_url' => '#news'],
+        ['date' => '20', 'month' => 'Oct, 20', 'author' => 'John Doe', 'cat' => 'Consulting', 'title' => 'In this context our main approach was to build.', 'excerpt' => 'The theory was first published in 2008 a press released under the name of Cliff Arnall, who at the time was a tutor at the…', 'image_url' => 'intime-05.jpg', 'button_text' => 'Read more', 'button_url' => '#news'],
+    ];
+}
+
+function normalizeLatestNewsContent($content) {
+    if (!is_array($content)) $content = [];
+    $defaults = defaultLatestNewsItems();
+    $list = [];
+    if (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
+        $list = $content['items'];
+    } elseif (isset($content['posts']) && is_array($content['posts']) && count($content['posts'])) {
+        $list = $content['posts'];
+    }
+    $items = [];
+    for ($i = 0; $i < 3; $i++) {
+        $item = is_array($list[$i] ?? null) ? $list[$i] : [];
+        $fallback = $defaults[$i];
+        $items[] = [
+            'date'        => $item['date'] ?? $item['day'] ?? $fallback['date'],
+            'month'       => $item['month'] ?? $item['month_label'] ?? $fallback['month'],
+            'author'      => $item['author'] ?? $item['by'] ?? $fallback['author'],
+            'cat'         => $item['cat'] ?? $item['category'] ?? $item['tag'] ?? $fallback['cat'],
+            'title'       => $item['title'] ?? $item['heading'] ?? $fallback['title'],
+            'excerpt'     => $item['excerpt'] ?? $item['text'] ?? $item['desc'] ?? $item['description'] ?? $fallback['excerpt'],
+            'image_url'   => $item['image_url'] ?? $item['image'] ?? $item['img'] ?? $fallback['image_url'],
+            'button_text' => $item['button_text'] ?? $item['read_more'] ?? $fallback['button_text'],
+            'button_url'  => $item['button_url'] ?? $item['url'] ?? $item['link'] ?? $fallback['button_url'],
+        ];
+    }
+    return [
+        'eyebrow' => $content['eyebrow'] ?? $content['tagline'] ?? 'OUR LATEST NEWS',
+        'heading' => $content['heading'] ?? 'Learn about our latest news from blog.',
+        'items'   => $items,
+    ];
+}
+
+function ensureLatestNewsSection(&$content) {
+    $source = $content['Latest News'] ?? null;
+    if ($source === null) return false;
+    $normalized = normalizeLatestNewsContent(is_array($source) ? $source : []);
+    $changed = json_encode($content['Latest News']) !== json_encode($normalized);
+    $content['Latest News'] = $normalized;
+    return $changed;
+}
+
 $pdo = getPdoConnection($DB_HOST, $DB_NAME, $DB_USER, $DB_PASS);
 
 // --------------------------------------------------------------------------
@@ -830,7 +879,7 @@ if ($pdo) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
-            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content) || ensureAnnualProgressionSection($content) || ensurePortfolioSection($content) || ensureBranchesSection($content) || ensureCounterStatsSection($content) || ensureTestimonialsSection($content)) {
+            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content) || ensureAnnualProgressionSection($content) || ensurePortfolioSection($content) || ensureBranchesSection($content) || ensureCounterStatsSection($content) || ensureTestimonialsSection($content) || ensureLatestNewsSection($content)) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
