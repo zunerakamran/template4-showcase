@@ -724,6 +724,25 @@ function ensureClientLogosSection(&$content) {
     return $changed;
 }
 
+function normalizeCtaBannerContent($content) {
+    if (!is_array($content)) $content = [];
+    return [
+        'heading'     => $content['heading'] ?? $content['title'] ?? 'Looking for the Best Business Consulting?',
+        'subheading'  => $content['subheading'] ?? $content['text'] ?? $content['desc'] ?? $content['description'] ?? 'As a web crawler expert, we will help to organize.',
+        'button_text' => $content['button_text'] ?? $content['btn_text'] ?? $content['button'] ?? 'GET A QUOTE',
+        'button_url'  => $content['button_url'] ?? $content['btn_url'] ?? $content['url'] ?? $content['link'] ?? '#appointment',
+    ];
+}
+
+function ensureCtaBannerSection(&$content) {
+    $source = $content['CTA Banner'] ?? null;
+    if ($source === null) return false;
+    $normalized = normalizeCtaBannerContent(is_array($source) ? $source : []);
+    $changed = json_encode($content['CTA Banner']) !== json_encode($normalized);
+    $content['CTA Banner'] = $normalized;
+    return $changed;
+}
+
 $pdo = getPdoConnection($DB_HOST, $DB_NAME, $DB_USER, $DB_PASS);
 
 // --------------------------------------------------------------------------
@@ -920,7 +939,7 @@ if ($pdo) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
-            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content) || ensureAnnualProgressionSection($content) || ensurePortfolioSection($content) || ensureBranchesSection($content) || ensureCounterStatsSection($content) || ensureTestimonialsSection($content) || ensureLatestNewsSection($content) || ensureClientLogosSection($content)) {
+            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content) || ensureAnnualProgressionSection($content) || ensurePortfolioSection($content) || ensureBranchesSection($content) || ensureCounterStatsSection($content) || ensureTestimonialsSection($content) || ensureLatestNewsSection($content) || ensureClientLogosSection($content) || ensureCtaBannerSection($content)) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
