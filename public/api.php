@@ -414,6 +414,65 @@ function ensureAnnualProgressionSection(&$content) {
     return $changed;
 }
 
+function defaultPortfolioItems() {
+    return [
+        ['heading' => 'Market Expansion', 'category' => 'Business Strategy', 'image_url' => 'intime-12.jpg', 'button_text' => 'Read more', 'button_url' => '#portfolio'],
+        ['heading' => 'Business Growth', 'category' => 'Investment', 'image_url' => 'intime-11.jpg', 'button_text' => 'Read more', 'button_url' => '#portfolio'],
+        ['heading' => 'Tax Management', 'category' => 'Tax Consulting', 'image_url' => 'intime-08.jpg', 'button_text' => 'Read more', 'button_url' => '#portfolio'],
+        ['heading' => 'Investment Policy', 'category' => 'Business Strategy', 'image_url' => 'intime-10.jpg', 'button_text' => 'Read more', 'button_url' => '#portfolio'],
+        ['heading' => 'Manage Investment', 'category' => 'Investment', 'image_url' => 'intime-04.jpg', 'button_text' => 'Read more', 'button_url' => '#portfolio'],
+        ['heading' => 'Financial Advices', 'category' => 'Tax Consulting', 'image_url' => 'intime-01.jpg', 'button_text' => 'Read more', 'button_url' => '#portfolio'],
+    ];
+}
+
+function pickPortfolioImage($item, $fallback) {
+    $image = $item['image_preview'] ?? $item['image_url'] ?? $item['image'] ?? $item['img'] ?? $fallback;
+    if (is_array($image)) {
+        $image = $image['url'] ?? $image['path'] ?? $image['relative_url'] ?? $image['src'] ?? $fallback;
+    }
+    return $image;
+}
+
+function normalizePortfolioContent($content) {
+    if (!is_array($content)) $content = [];
+    $legacy = isset($content['eyebrow'], $content['subheading']) && !isset($content['items']);
+    $defaults = defaultPortfolioItems();
+    $list = [];
+    if (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
+        $list = $content['items'];
+    } elseif (isset($content['projects']) && is_array($content['projects']) && count($content['projects'])) {
+        $list = $content['projects'];
+    } elseif (isset($content['boxes']) && is_array($content['boxes']) && count($content['boxes'])) {
+        $list = $content['boxes'];
+    }
+    $items = [];
+    for ($i = 0; $i < 6; $i++) {
+        $item = is_array($list[$i] ?? null) ? $list[$i] : [];
+        $fallback = $defaults[$i];
+        $items[] = [
+            'heading'     => $item['heading'] ?? $item['title'] ?? $fallback['heading'],
+            'category'    => $item['category'] ?? $item['cat'] ?? $item['caption'] ?? $fallback['category'],
+            'image_url'   => pickPortfolioImage($item, $fallback['image_url']),
+            'button_text' => $item['button_text'] ?? $item['read_more'] ?? $fallback['button_text'],
+            'button_url'  => $item['button_url'] ?? $item['url'] ?? $item['link'] ?? $fallback['button_url'],
+        ];
+    }
+    return [
+        'subheading' => $legacy ? ($content['eyebrow'] ?? 'COMPLETED PROJECTS') : ($content['subheading'] ?? $content['eyebrow'] ?? 'COMPLETED PROJECTS'),
+        'heading'    => $content['heading'] ?? 'You can check our projects as inspirations.',
+        'items'      => $items,
+    ];
+}
+
+function ensurePortfolioSection(&$content) {
+    $source = $content['Portfolio Section'] ?? null;
+    if ($source === null) return false;
+    $normalized = normalizePortfolioContent(is_array($source) ? $source : []);
+    $changed = json_encode($content['Portfolio Section']) !== json_encode($normalized);
+    $content['Portfolio Section'] = $normalized;
+    return $changed;
+}
+
 $pdo = getPdoConnection($DB_HOST, $DB_NAME, $DB_USER, $DB_PASS);
 
 // --------------------------------------------------------------------------
@@ -610,7 +669,7 @@ if ($pdo) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
-            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content) || ensureAnnualProgressionSection($content)) {
+            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content) || ensureAnnualProgressionSection($content) || ensurePortfolioSection($content)) {
                 $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
                 $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
             }
