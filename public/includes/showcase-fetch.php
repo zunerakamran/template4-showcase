@@ -44,12 +44,14 @@ function fetchShowcaseFromTemplates(PDO $pdo, $slug) {
         $tplRow = $tplStmt->fetch();
         if (!$tplRow) return null;
 
+        // Prefer file seed over stale DB dummy_content so showcase matches cPanel defaults
         $content = decodeDummyContent($tplRow['dummy_content']);
         $seed = loadSeedDummyContent($slug);
         if ($seed && empty($content)) {
             $content = $seed;
         } elseif ($seed) {
-            $content = array_replace_recursive($seed, $content);
+            // File is source of truth for overlapping keys; DB only keeps extra keys
+            $content = array_replace_recursive($content, $seed);
         }
         if (empty($content)) return null;
 

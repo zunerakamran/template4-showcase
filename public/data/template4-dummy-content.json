@@ -9,45 +9,25 @@
     "address": "12/7 New York, USA"
   },
   "Hero Slider": {
+    "eyebrow": "FINANCIAL CENTRE & WEALTH MANAGEMENT",
+    "heading": "Strategic Advisory for Long-Term Growth",
+    "subheading": "Customized financial planning, investment strategies, and fiduciary advice for leaders and families.",
+    "button_text": "GET IN TOUCH",
+    "button_url": "#appointment",
+    "video_url": "https://www.youtube.com/watch?v=SF4aHwxHtZ0",
+    "video_label": "SEE OUR ACTIVITY",
     "slides": [
       {
-        "id": 1,
-        "bg": "bg-slider-01.jpg",
-        "image_url": "bg-slider-01.jpg",
-        "eyebrow": "FINANCIAL CENTRE & WEALTH MANAGEMENT",
-        "heading": "Strategic Advisory for Long-Term Growth",
-        "title": ["Strategic Advisory for", "Long-Term Growth"],
-        "subheading": "Customized financial planning, investment strategies, and fiduciary advice for leaders and families.",
-        "text": "We partner with you to navigate complex economic landscapes with confidence.",
-        "button_text": "GET IN TOUCH",
-        "button_url": "#appointment",
-        "youtube_url": "https://www.youtube.com/watch?v=SF4aHwxHtZ0"
+        "title": ["Prosper in this", "volatile market", "funding."],
+        "image_url": "intime-08"
       },
       {
-        "id": 2,
-        "bg": "bg-slider2.jpg",
-        "image_url": "bg-slider2.jpg",
-        "eyebrow": "FINANCIAL CENTRE & WEALTH MANAGEMENT",
-        "heading": "We do the best thing for market funding",
         "title": ["We do the best", "thing for market", "funding."],
-        "subheading": "High-impact financial solutions: institutional-grade portfolio management and risk mitigation strategies.",
-        "text": "Our team delivers proven results through disciplined investment approaches.",
-        "button_text": "GET IN TOUCH",
-        "button_url": "#appointment",
-        "youtube_url": "https://www.youtube.com/watch?v=SF4aHwxHtZ0"
+        "image_url": "intime-12"
       },
       {
-        "id": 3,
-        "bg": "bg-slider3.jpg",
-        "image_url": "bg-slider3.jpg",
-        "eyebrow": "FINANCIAL CENTRE & WEALTH MANAGEMENT",
-        "heading": "We have to do business for your satisfaction",
-        "title": ["We have to do", "business for your", "satisfaction."],
-        "subheading": "Building lasting relationships through transparent communication and exceptional service.",
-        "text": "Your financial success is our primary mission and commitment.",
-        "button_text": "GET IN TOUCH",
-        "button_url": "#appointment",
-        "youtube_url": "https://www.youtube.com/watch?v=SF4aHwxHtZ0"
+        "title": ["We have to do", "business for your", "Satisfiction."],
+        "image_url": "intime-15"
       }
     ]
   },
@@ -57,21 +37,21 @@
     "text": "Improve efficiency, provide a better customer experience with modern technology services available around the world. Our skilled staff, combined with decades of experience.",
     "boxes": [
       {
-        "image_url": "intime-12.jpg",
+        "image_url": "intime-12",
         "heading": "Business & Strategy",
         "text": "If you're looking for car insurance, we will help you to find the coverage that budget friendly.",
         "button_text": "Read more",
         "button_url": "#services"
       },
       {
-        "image_url": "intime-06.jpg",
+        "image_url": "intime-06",
         "heading": "Business Planner",
         "text": "If you're looking for car insurance, we will help you to find the coverage that budget friendly.",
         "button_text": "Read more",
         "button_url": "#services"
       },
       {
-        "image_url": "intime-15.jpg",
+        "image_url": "intime-15",
         "heading": "Business Intelligence",
         "text": "If you're looking for car insurance, we will help you to find the coverage that budget friendly.",
         "button_text": "Read more",
@@ -199,9 +179,9 @@
     ]
   },
   "CTA Banner": {
-    "heading": "Ready to build and protect your financial legacy?",
-    "subheading": "Schedule a private consultation with a senior financial advisor today.",
-    "button_text": "BOOK CONSULTATION",
+    "heading": "Looking for the Best Business Consulting?",
+    "subheading": "As a web crawler expert, we will help to organize.",
+    "button_text": "GET A QUOTE",
     "button_url": "#appointment"
   },
   "Footer": {

@@ -81,12 +81,45 @@ Then run `php artisan config:clear`. These URLs are pushed to every advisor site
 ### Power Admin quick reference
 
 ```
-SHOWCASE (once):
-  Build → Upload → cpanel-config.php (manual) → Done
+SHOWCASE (once, hub only):
+  Build → Upload → cpanel-config.php with HUB DB + DEPLOYMENT_MODE=showcase → Done
 
 EACH ADVISOR:
-  Upload same build → Create DB → Fill deploy form → Deploy → Done
+  Upload same build → Create LOCAL DB on THAT cPanel →
+  cpanel-config.php with ADVISOR mode + LOCAL DB (never hub DB) →
+  Fill deploy form → Deploy → Done
 ```
+
+### ⚠ Critical: why adviser1 content looked "totally different"
+
+Live check of `https://adviser1.fin-proms.com/api.php` showed:
+
+| Field | Wrong value found | Should be |
+|-------|-------------------|-----------|
+| `deployment_mode` | `showcase` | `advisor` |
+| `db_name` | `devznrepats_compliance_database` (hub) | advisor's **local** cPanel DB |
+| `content_source` | `templates.dummy_content` | `cpanel_sections` |
+| `site_url` | showcase URL | `https://adviser1.fin-proms.com` |
+
+So the advisor site was using the **showcase config** (hub database + showcase mode).  
+The empty database you saw in adviser1 cPanel was never used.  
+Dashboard edits live in the **hub** `sections` table; the live site was reading **hub** `templates.dummy_content` — two different sources → different content/images.
+
+**Fix for https://adviser1.fin-proms.com/ :**
+
+1. In adviser1 cPanel, create (or use) a **local** MySQL database (empty is fine).
+2. Replace `cpanel-config.php` next to `api.php` with **advisor** settings (see `cpanel-config.advisor.example.php`):
+   - `DEPLOYMENT_MODE` => `advisor`
+   - DB name/user/pass = that **local** DB
+   - `ADVISOR_ID` => the advisor's hub user id
+   - `SITE_URL` => `https://adviser1.fin-proms.com`
+3. In Power Admin dashboard → Deploy form for this request:
+   - Domain: `https://adviser1.fin-proms.com`
+   - Same local DB credentials + API key
+4. Click **Deploy** so Laravel pushes published sections into the local DB.
+5. Verify: open `https://adviser1.fin-proms.com/api.php` — you should see `"deployment_mode": "advisor"` and `"content_source": "cpanel_sections"`.
+
+Never copy `cpanel-config.php` from the showcase/hub project onto an advisor cPanel.
 
 ---
 
