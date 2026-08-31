@@ -328,18 +328,12 @@ function resolveDbConfig($input = null) {
 }
 
 function resolveDeploymentMode(array $cfg, PDO $pdo = null) {
+    // cpanel-config.php / deploy POST payload is the source of truth.
+    // Do NOT let a leftover site_settings.deployment_mode flip advisor → showcase
+    // (that prevented sections table creation on advisor cPanels).
     $mode = strtolower(trim((string)($cfg['DEPLOYMENT_MODE'] ?? 'advisor')));
-    if ($pdo) {
-        try {
-            $stmt = $pdo->prepare("SELECT setting_value FROM site_settings WHERE setting_key = 'deployment_mode' LIMIT 1");
-            $stmt->execute();
-            $dbMode = $stmt->fetchColumn();
-            if ($dbMode) {
-                $mode = strtolower(trim((string)$dbMode));
-            }
-        } catch (Exception $e) {
-            // optional
-        }
+    if ($mode === '') {
+        $mode = 'advisor';
     }
     return in_array($mode, ['showcase', 'advisor'], true) ? $mode : 'advisor';
 }
@@ -368,22 +362,12 @@ function saveSiteSetting(PDO $pdo, $key, $value) {
 
 $PDO_CONNECT_ERROR = null;
 
-function getPdoConnection($host, $name, $user, $pass, $deploymentMode = 'advisor') {
+/**
+ * Ensure advisor cPanel has local site_settings + sections tables.
+ * Safe to call repeatedly (IF NOT EXISTS / empty-seed only).
+ */
+function ensureAdvisorSchema(PDO $pdo) {
     global $PDO_CONNECT_ERROR;
-    $PDO_CONNECT_ERROR = null;
-    if (isPlaceholderDb($name, $user)) {
-        $PDO_CONNECT_ERROR = 'MySQL credentials are placeholders. Create public/cpanel-config.php with this site\'s database credentials.';
-        return null;
-    }
-    try {
-        $pdo = new PDO("mysql:host={$host};dbname={$name};charset=utf8mb4", $user, $pass, [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]);
-    } catch (Exception $e) {
-        $PDO_CONNECT_ERROR = $e->getMessage();
-        return null;
-    }
 
     try {
         $pdo->exec("CREATE TABLE IF NOT EXISTS `site_settings` (
@@ -391,18 +375,20 @@ function getPdoConnection($host, $name, $user, $pass, $deploymentMode = 'advisor
             `setting_value` TEXT NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
     } catch (Exception $e) {
-        // optional
+        $PDO_CONNECT_ERROR = 'site_settings create failed: ' . $e->getMessage();
     }
 
-    if ($deploymentMode === 'advisor' && !tableExists($pdo, 'sections')) {
-        $pdo->exec("CREATE TABLE `sections` (
-            `id` INT AUTO_INCREMENT PRIMARY KEY,
-            `section_name` VARCHAR(255) NOT NULL UNIQUE,
-            `display_name` VARCHAR(255) NULL,
-            `is_visible` TINYINT(1) NOT NULL DEFAULT 1,
-            `content` LONGTEXT NOT NULL,
-            `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+    try {
+        if (!tableExists($pdo, 'sections')) {
+            $pdo->exec("CREATE TABLE `sections` (
+                `id` INT AUTO_INCREMENT PRIMARY KEY,
+                `section_name` VARCHAR(255) NOT NULL UNIQUE,
+                `display_name` VARCHAR(255) NULL,
+                `is_visible` TINYINT(1) NOT NULL DEFAULT 1,
+                `content` LONGTEXT NOT NULL,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        }
 
         ensureSectionMetaColumns($pdo);
 
@@ -423,6 +409,40 @@ function getPdoConnection($host, $name, $user, $pass, $deploymentMode = 'advisor
                 }
             }
         }
+    } catch (Exception $e) {
+        $PDO_CONNECT_ERROR = 'sections create/seed failed: ' . $e->getMessage();
+    }
+}
+
+function getPdoConnection($host, $name, $user, $pass, $deploymentMode = 'advisor') {
+    global $PDO_CONNECT_ERROR;
+    $PDO_CONNECT_ERROR = null;
+    if (isPlaceholderDb($name, $user)) {
+        $PDO_CONNECT_ERROR = 'MySQL credentials are placeholders. Create public/cpanel-config.php with this site\'s database credentials.';
+        return null;
+    }
+    try {
+        $pdo = new PDO("mysql:host={$host};dbname={$name};charset=utf8mb4", $user, $pass, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]);
+    } catch (Exception $e) {
+        $PDO_CONNECT_ERROR = $e->getMessage();
+        return null;
+    }
+
+    // Always ensure site_settings exists (both modes use it)
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `site_settings` (
+            `setting_key` VARCHAR(100) PRIMARY KEY,
+            `setting_value` TEXT NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+    } catch (Exception $e) {
+        // optional on hub/showcase if table already managed by Laravel
+    }
+
+    if (strtolower((string)$deploymentMode) === 'advisor') {
+        ensureAdvisorSchema($pdo);
     }
 
     return $pdo;
@@ -671,8 +691,16 @@ $deploymentMode = resolveDeploymentMode($dbCfg);
 $pdo = getPdoConnection($dbCfg['DB_HOST'], $dbCfg['DB_NAME'], $dbCfg['DB_USER'], $dbCfg['DB_PASS'], $deploymentMode);
 
 if ($pdo) {
-    syncDeploymentSettings($pdo, $dbCfg);
-    $deploymentMode = resolveDeploymentMode($dbCfg, $pdo);
+    // On deploy / when payload forces advisor mode, always ensure local tables exist
+    $forceAdvisor = strtolower((string)($dbCfg['DEPLOYMENT_MODE'] ?? '')) === 'advisor'
+        || !empty($input['write_config'])
+        || (isset($input['deployment_mode']) && strtolower((string)$input['deployment_mode']) === 'advisor');
+    if ($forceAdvisor || $deploymentMode === 'advisor') {
+        $deploymentMode = 'advisor';
+        ensureAdvisorSchema($pdo);
+    }
+    syncDeploymentSettings($pdo, array_merge($dbCfg, ['DEPLOYMENT_MODE' => $deploymentMode]));
+    $deploymentMode = resolveDeploymentMode(array_merge($dbCfg, ['DEPLOYMENT_MODE' => $deploymentMode]), $pdo);
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -803,8 +831,11 @@ $result = [
 
 if ($pdo) {
     loadSiteSettings($pdo, $result);
-    if (!empty($result['deployment_mode'])) {
+    // Keep config-driven mode; only fill mode from DB if config did not set one
+    if (empty($dbCfg['DEPLOYMENT_MODE']) && !empty($result['deployment_mode'])) {
         $deploymentMode = strtolower((string)$result['deployment_mode']);
+    } else {
+        $result['deployment_mode'] = $deploymentMode;
     }
 }
 

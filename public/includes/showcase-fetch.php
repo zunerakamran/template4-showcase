@@ -2,6 +2,11 @@
 /**
  * Showcase-mode content fetchers (hub / Laravel database).
  * Used when DEPLOYMENT_MODE = 'showcase'.
+ *
+ * Priority:
+ *   1) Laravel `sections` (advisor_id IS NULL) — live dashboard edits
+ *   2) templates.dummy_content — template defaults
+ *   3) local JSON file fallback
  */
 
 function decodeDummyContent($raw) {
@@ -72,12 +77,33 @@ function fetchShowcaseFromLaravelSections(PDO $pdo) {
         if (!$pageRow) return null;
 
         $pageId = $pageRow['id'];
-        $secStmt = $pdo->prepare(
-            'SELECT name, content, display_name, is_visible, section_key
-             FROM sections
-             WHERE page_id = ? AND advisor_id IS NULL
-             ORDER BY id ASC'
-        );
+
+        // Discover optional columns so older schemas still work
+        $cols = [];
+        try {
+            foreach ($pdo->query('SHOW COLUMNS FROM `sections`') as $row) {
+                $cols[strtolower($row['Field'])] = $row['Field'];
+            }
+        } catch (Exception $e) {
+            return null;
+        }
+
+        if (!isset($cols['name']) || !isset($cols['content'])) {
+            return null;
+        }
+
+        $select = ['`name`', '`content`'];
+        if (isset($cols['display_name'])) $select[] = '`display_name`';
+        if (isset($cols['is_visible'])) $select[] = '`is_visible`';
+        if (isset($cols['section_key'])) $select[] = '`section_key`';
+
+        $sql = 'SELECT ' . implode(', ', $select) . ' FROM `sections` WHERE `page_id` = ?';
+        if (isset($cols['advisor_id'])) {
+            $sql .= ' AND `advisor_id` IS NULL';
+        }
+        $sql .= ' ORDER BY `id` ASC';
+
+        $secStmt = $pdo->prepare($sql);
         $secStmt->execute([$pageId]);
 
         $sections = [];
@@ -98,7 +124,7 @@ function fetchShowcaseFromLaravelSections(PDO $pdo) {
             $list[] = [
                 'name'         => $name,
                 'section_key'  => $key,
-                'display_name' => $row['display_name'] ?: $name,
+                'display_name' => $row['display_name'] ?? $name,
                 'is_visible'   => $visible,
                 'content'      => $visible ? $cnt : null,
             ];
@@ -120,11 +146,12 @@ function fetchShowcaseFromLaravelSections(PDO $pdo) {
 }
 
 function fetchShowcaseContent(PDO $pdo, $slug, $dataFile) {
-    $fromTemplates = fetchShowcaseFromTemplates($pdo, $slug);
-    if ($fromTemplates) return $fromTemplates;
-
+    // Dashboard edits live in sections (advisor_id NULL) — prefer those
     $fromSections = fetchShowcaseFromLaravelSections($pdo);
     if ($fromSections) return $fromSections;
+
+    $fromTemplates = fetchShowcaseFromTemplates($pdo, $slug);
+    if ($fromTemplates) return $fromTemplates;
 
     if (!file_exists($dataFile)) return null;
 
