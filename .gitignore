@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Server-side secrets (created per deployment)
+public/cpanel-config.php
+public/data/cpanel-db.php
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

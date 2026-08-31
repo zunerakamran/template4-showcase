@@ -2,8 +2,16 @@
 import { images } from '../assets/images.js';
 import CONFIG from '../../config.js';
 
-const uploadsOrigin = String(CONFIG.UPLOADS_ORIGIN || CONFIG.API_URL || '')
-  .replace(/\/api\.php$/i, '');
+let runtimeUploadsOrigin = null;
+
+/** Set from api.php site_settings after first content load */
+export const setRuntimeUploadsOrigin = (url) => {
+  if (url) runtimeUploadsOrigin = url;
+};
+
+const getUploadsOrigin = () =>
+  String(runtimeUploadsOrigin || CONFIG.UPLOADS_ORIGIN || CONFIG.API_URL || '')
+    .replace(/\/api\.php$/i, '');
 
 const isAbsoluteOrInline = (url) =>
   /^(https?:|data:|blob:)/i.test(url);
@@ -17,9 +25,10 @@ const toUploadsUrl = (url) => {
   }
   if (isAbsoluteOrInline(next) && !next.includes('/uploads/') && !next.includes('/uploaded-images/')) return next;
   if (isAbsoluteOrInline(next)) return next;
-  if (!uploadsOrigin) return next.startsWith('/') ? next : `/${next}`;
+  const origin = getUploadsOrigin();
+  if (!origin) return next.startsWith('/') ? next : `/${next}`;
   const path = next.startsWith('/') ? next : `/${next}`;
-  return `${uploadsOrigin}${path}`;
+  return `${origin}${path}`;
 };
 
 const isUploadPath = (url) =>

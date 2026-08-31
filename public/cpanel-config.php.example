@@ -1,0 +1,28 @@
+<?php
+/**
+ * Server-side deployment config — copy to cpanel-config.php and fill in values.
+ * Power Admin sets this when deploying the template (showcase or advisor cPanel).
+ *
+ * NEVER put DB passwords in config.js — they belong here only.
+ */
+return [
+    // 'showcase' = hub demo site | 'advisor' = live advisor site
+    'DEPLOYMENT_MODE' => 'showcase',
+
+    // MySQL credentials for THIS deployment's database
+    'DB_HOST' => 'localhost',
+    'DB_NAME' => 'YOUR_DB_NAME',
+    'DB_USER' => 'YOUR_DB_USER',
+    'DB_PASS' => 'YOUR_DB_PASS',
+
+    // Must match cpanel_api_key in the Laravel dashboard for publish/sync
+    'SECRET_API_KEY' => 'YOUR_SECRET_KEY',
+
+    // Advisor ID (null for showcase)
+    'ADVISOR_ID' => null,
+
+    // URLs stored in site_settings and returned to the React app at runtime
+    'UPLOADS_ORIGIN' => 'https://devznr.epatronus.net/compliance/api/api',
+    'SITE_URL'       => 'https://your-domain.example.com',
+    'LARAVEL_API_URL'=> 'https://devznr.epatronus.net/compliance/api/api',
+];

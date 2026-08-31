@@ -16,6 +16,8 @@ import CtaBanner from '../components/Home/CtaBanner';
 import Footer from '../components/Footer/Footer';
 import { publicApi } from '../api/axios';
 import CONFIG from '../../config.js';
+import { setRuntimeUploadsOrigin } from '../utils/img';
+import { canonicalSectionKey, VISIBILITY_ALIASES, applyVisibilityAliases } from '../utils/sectionKeys';
 
 const parseContent = (contentStr) => {
   if (!contentStr) return null;
@@ -27,41 +29,58 @@ const parseContent = (contentStr) => {
   }
 };
 
-const sectionKey = (name) => (name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-
-const buildSectionsMap = (payload) => {
+const buildSectionsPayload = (payload) => {
   const map = {};
+  const visibility = {};
 
   const list = payload?.sections_list;
   if (Array.isArray(list) && list.length) {
     list.forEach((sec) => {
       if (!sec?.name) return;
-      const key = sectionKey(sec.name);
-      // Keep the first row per name. Duplicate showcase rows exist in DB;
-      // the edited Hero Slider is the first "Hero Slider" entry from the API.
+      const key = canonicalSectionKey(sec.section_key || sec.name);
+      const visible = sec.is_visible !== false && sec.is_visible !== 0 && sec.is_visible !== '0';
+      visibility[key] = visible;
+      if (!visible) return;
       if (map[key] == null) {
         map[key] = parseContent(sec.content);
       }
     });
-    return map;
+    return { map, visibility: applyVisibilityAliases(visibility) };
   }
 
   const keyed = payload?.sections;
   if (keyed && typeof keyed === 'object' && !Array.isArray(keyed)) {
     Object.keys(keyed).forEach((name) => {
-      map[sectionKey(name)] = parseContent(keyed[name]);
+      const key = canonicalSectionKey(name);
+      visibility[key] = true;
+      map[key] = parseContent(keyed[name]);
     });
+    return { map, visibility: applyVisibilityAliases(visibility) };
   }
 
-  return map;
+  return { map, visibility };
+};
+
+const isVisibleSection = (visibility, keys) => {
+  const list = Array.isArray(keys) ? keys : [keys];
+  const hasVisibilityData = visibility && Object.keys(visibility).length > 0;
+  if (!hasVisibilityData) return true;
+
+  const explicit = list.filter((key) => Object.prototype.hasOwnProperty.call(visibility, key));
+  if (explicit.length) {
+    return explicit.some((key) => visibility[key] !== false);
+  }
+
+  return false;
 };
 
 const Home = () => {
   const [sectionsMap, setSectionsMap] = useState({});
+  const [sectionVisibility, setSectionVisibility] = useState({});
   const [contentReady, setContentReady] = useState(false);
   const searchParams = new URLSearchParams(window.location.search);
   const targetSection = (searchParams.get('section') || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const heroData = sectionsMap['heroslider'] || sectionsMap['hero'];
+  const heroData = sectionsMap['heroslider'] || sectionsMap['hero'] || sectionsMap['herosection'];
   const heroReady = contentReady || Boolean(heroData);
   const whatWeDoData = sectionsMap['whatwedo'] || sectionsMap['featurescarousel'] || sectionsMap['features'];
   const isWhatWeDoPreview = targetSection === 'whatwedo' || targetSection === 'featurescarousel' || targetSection === 'features';
@@ -89,41 +108,37 @@ const Home = () => {
   const isCtaBannerPreview = targetSection === 'ctabanner' || targetSection === 'cta' || targetSection.includes('ctabanner');
 
   useEffect(() => {
-    // ── Skip API fetch in iframe preview mode ─────────────────────────────────
-    // When loaded with ?section=... (inside the dashboard iframe), all content
-    // comes exclusively from the dashboard via postMessage.  If we also fetch
-    // from the API, the response arrives AFTER the postMessage data and resets
-    // sectionsMap back to the live DB values — making the advisor's edits
-    // disappear after a few milliseconds.  Skip the fetch to prevent this.
     if (targetSection) return;
 
-    publicApi.get('/pages/home', {
-      params: { advisor_id: CONFIG.ADVISOR_ID ?? 0 },
+    const advisorId = CONFIG.ADVISOR_ID ?? (CONFIG.DEPLOYMENT_MODE === 'showcase' ? 0 : null);
+
+    publicApi.get('', {
+      params: { advisor_id: advisorId },
       headers: { 'Cache-Control': 'no-cache' },
     })
-      .then(res => {
+      .then((res) => {
         if (res.data) {
-          setSectionsMap(buildSectionsMap(res.data));
+          const { map, visibility } = buildSectionsPayload(res.data);
+          setSectionsMap(map);
+          setSectionVisibility(visibility);
+          if (res.data.uploads_origin) {
+            setRuntimeUploadsOrigin(res.data.uploads_origin);
+          }
         }
       })
-      .catch(err => {
-        console.warn('Backend home page load note:', err.message);
+      .catch((err) => {
+        console.warn('Content load note:', err.message);
       })
       .finally(() => setContentReady(true));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Dashboard live-preview bridge ──────────────────────────────────────────
-  // Listens for postMessage from the dashboard iframe parent.
-  // When the advisor edits a field, the dashboard sends:
-  //   { type: 'SECTION_PREVIEW', sectionKey: 'aboutsection', content: { heading, ... } }
-  // We update sectionsMap so the real component re-renders with the draft data.
   useEffect(() => {
     const handleMessage = (event) => {
       if (event.data?.type !== 'SECTION_PREVIEW') return;
       const { sectionKey, content } = event.data;
       if (sectionKey && content && typeof content === 'object') {
         const key = String(sectionKey).toLowerCase().replace(/[^a-z0-9]/g, '');
-        setSectionsMap(prev => {
+        setSectionsMap((prev) => {
           const next = { ...prev, [sectionKey]: content, [key]: content };
           if (key.includes('about')) {
             const merged = { ...(prev.aboutsection || prev.about || prev.aboutus || {}), ...content };
@@ -189,9 +204,6 @@ const Home = () => {
     };
     window.addEventListener('message', handleMessage);
 
-    // ── Handshake: notify the parent that our listener is live ──────────────
-    // The dashboard waits for this signal before sending data, so there is
-    // no race condition between the postMessage and listener setup.
     if (window.parent && window.parent !== window) {
       window.parent.postMessage(
         { type: 'SECTION_PREVIEW_READY', sectionKey: targetSection },
@@ -202,11 +214,10 @@ const Home = () => {
     return () => window.removeEventListener('message', handleMessage);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Isolated section preview mode for dashboard iframe
   if (targetSection) {
     return (
       <div className="bg-white min-h-screen p-2 font-sans selection:bg-[#C8102E] selection:text-white">
-        { (targetSection.includes('hero') || targetSection.includes('slider')) && <HeroSlider data={heroData} ready={heroReady} /> }
+        { (targetSection.includes('hero') || targetSection.includes('slider') || targetSection === 'herosection') && <HeroSlider data={heroData} ready={heroReady} /> }
         { isWhatWeDoPreview && <WhatWeDo data={whatWeDoData} /> }
         { isAboutPreview && <AboutSection data={aboutData} /> }
         { isHistoryPreview && <CompanyHistory data={companyHistoryData} /> }
@@ -227,19 +238,53 @@ const Home = () => {
     <div className="min-h-screen bg-white text-gray-800 selection:bg-[#C8102E] selection:text-white">
       <Header data={sectionsMap['header']} />
       <main>
-        <HeroSlider data={heroData} ready={heroReady} />
-        <WhatWeDo data={whatWeDoData} />
-        <AboutSection data={aboutData} />
-        <CompanyHistory data={companyHistoryData} />
-        <FeaturedServices data={featuredServicesData} />
-        <AnnualProgression data={annualProgressionData} />
-        <PortfolioSection data={portfolioData} />
-        <BranchesAndAppointment data={branchesData} />
-        <CounterStats data={counterStatsData} />
-        <TestimonialsCarousel data={testimonialsData} />
-        <LatestNews data={latestNewsData} />
-        <ClientLogos data={clientLogosData} />
-        <CtaBanner data={ctaBannerData} />
+        {!contentReady ? (
+          <div className="min-h-[320px] flex items-center justify-center text-gray-400 text-sm">
+            Loading site content…
+          </div>
+        ) : (
+          <>
+            {isVisibleSection(sectionVisibility, VISIBILITY_ALIASES.heroslider) && (
+              <HeroSlider data={heroData} ready />
+            )}
+            {isVisibleSection(sectionVisibility, VISIBILITY_ALIASES.whatwedo) && (
+              <WhatWeDo data={whatWeDoData} />
+            )}
+            {isVisibleSection(sectionVisibility, VISIBILITY_ALIASES.aboutsection) && (
+              <AboutSection data={aboutData} />
+            )}
+            {isVisibleSection(sectionVisibility, VISIBILITY_ALIASES.companyhistory) && (
+              <CompanyHistory data={companyHistoryData} />
+            )}
+            {isVisibleSection(sectionVisibility, VISIBILITY_ALIASES.featuredservices) && (
+              <FeaturedServices data={featuredServicesData} />
+            )}
+            {isVisibleSection(sectionVisibility, VISIBILITY_ALIASES.annualprogression) && (
+              <AnnualProgression data={annualProgressionData} />
+            )}
+            {isVisibleSection(sectionVisibility, VISIBILITY_ALIASES.portfoliosection) && (
+              <PortfolioSection data={portfolioData} />
+            )}
+            {isVisibleSection(sectionVisibility, VISIBILITY_ALIASES.branchesandappointment) && (
+              <BranchesAndAppointment data={branchesData} />
+            )}
+            {isVisibleSection(sectionVisibility, VISIBILITY_ALIASES.counterstats) && (
+              <CounterStats data={counterStatsData} />
+            )}
+            {isVisibleSection(sectionVisibility, VISIBILITY_ALIASES.testimonialscarousel) && (
+              <TestimonialsCarousel data={testimonialsData} />
+            )}
+            {isVisibleSection(sectionVisibility, VISIBILITY_ALIASES.latestnews) && (
+              <LatestNews data={latestNewsData} />
+            )}
+            {isVisibleSection(sectionVisibility, VISIBILITY_ALIASES.clientlogos) && (
+              <ClientLogos data={clientLogosData} />
+            )}
+            {isVisibleSection(sectionVisibility, VISIBILITY_ALIASES.ctabanner) && (
+              <CtaBanner data={ctaBannerData} />
+            )}
+          </>
+        )}
       </main>
       <Footer data={sectionsMap['footer']} />
     </div>

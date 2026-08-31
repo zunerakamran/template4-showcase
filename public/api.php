@@ -1,10 +1,8 @@
 <?php
-// Enable CORS
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-API-Key, X-Requested-With');
 
-// Handle preflight OPTIONS request
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
@@ -13,823 +11,761 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 header('Content-Type: application/json');
 
 // --------------------------------------------------------------------------
-// SHOWCASE CONFIGURATION
-// This api.php belongs to the SHOWCASE version of template4.
-// It uses its OWN dedicated database — completely separate from advisor DBs.
-// 1. Secret API Key: Set to match cpanel_api_key in Laravel Dashboard.
-// 2. MySQL Database Settings: Fill with your main cPanel MySQL DB credentials.
+// UNIFIED TEMPLATE API — one codebase for showcase AND advisor deployments.
+// Configure via public/cpanel-config.php (copy from cpanel-config.php.example).
 // --------------------------------------------------------------------------
-$SECRET_API_KEY = "YOUR_SECRET_KEY";
+$DEPLOYMENT_MODE = 'showcase';
+$ADVISOR_ID      = null;
+$UPLOADS_ORIGIN  = '';
+$SITE_URL        = '';
+$LARAVEL_API_URL = '';
+$SECRET_API_KEY  = 'YOUR_SECRET_KEY';
 
-$DB_HOST = "localhost";
-$DB_NAME = "devznrepats_compliance_database";
-$DB_USER = "devznrepats_compliance_database_user";
-$DB_PASS = "cd8jtxl3.JTi";
+$DB_HOST = 'localhost';
+$DB_NAME = 'YOUR_DB_NAME';
+$DB_USER = 'YOUR_DB_USER';
+$DB_PASS = '';
 
-// File fallback path (showcase-specific)
-$dataDir  = __DIR__ . '/data';
-$dataFile = $dataDir . '/showcase-content.json';
-
-// Helper: Establish PDO MySQL Connection & Auto-Create Tables with Initial Seeding
-function getPdoConnection($host, $name, $user, $pass) {
-    if (empty($host) || empty($name) || empty($user) || $host === "YOUR_DB_HOST" || $name === "YOUR_SHOWCASE_DB_NAME") return null;
-    try {
-        $pdo = new PDO("mysql:host={$host};dbname={$name};charset=utf8mb4", $user, $pass, [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-        ]);
-
-        // Use Laravel backend sections table structure
-        // The table already exists in the Laravel backend database
-
-        // Auto-create site_settings table
-        $pdo->exec("CREATE TABLE IF NOT EXISTS `site_settings` (
-            `setting_key` VARCHAR(100) PRIMARY KEY,
-            `setting_value` TEXT NULL
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-
-        // ── LARAVEL BACKEND INTEGRATION ─────────────────────────────────────────
-        // Fetch content from Laravel backend's sections table where advisor_id IS NULL
-        // This connects to the same database used by the content-flow-backend
-        // ─────────────────────────────────────────────────────────────────────
-
-        return $pdo;
-    } catch (Exception $e) {
-        return null;
+$manualConfigFile = __DIR__ . '/cpanel-config.php';
+if (file_exists($manualConfigFile)) {
+    $manual = include $manualConfigFile;
+    if (is_array($manual)) {
+        $DEPLOYMENT_MODE = $manual['DEPLOYMENT_MODE'] ?? $DEPLOYMENT_MODE;
+        $ADVISOR_ID      = $manual['ADVISOR_ID'] ?? $ADVISOR_ID;
+        $UPLOADS_ORIGIN  = $manual['UPLOADS_ORIGIN'] ?? $UPLOADS_ORIGIN;
+        $SITE_URL        = $manual['SITE_URL'] ?? $SITE_URL;
+        $LARAVEL_API_URL = $manual['LARAVEL_API_URL'] ?? $LARAVEL_API_URL;
+        $DB_HOST         = $manual['DB_HOST'] ?? $DB_HOST;
+        $DB_NAME         = $manual['DB_NAME'] ?? $DB_NAME;
+        $DB_USER         = $manual['DB_USER'] ?? $DB_USER;
+        $DB_PASS         = $manual['DB_PASS'] ?? $DB_PASS;
+        $SECRET_API_KEY  = $manual['SECRET_API_KEY'] ?? $SECRET_API_KEY;
     }
 }
 
-function decodeDummyContent($raw) {
+$dataDir  = __DIR__ . '/data';
+$dataFile = $dataDir . '/content.json';
+$showcaseDataFile = $dataDir . '/showcase-content.json';
+$seedFile = $dataDir . '/default-sections.json';
+$dbConfigFile = $dataDir . '/cpanel-db.php';
+
+require_once __DIR__ . '/includes/showcase-fetch.php';
+
+function jsonBody($raw) {
     if (!$raw) return [];
     if (is_array($raw)) return $raw;
     $decoded = json_decode($raw, true);
     return is_array($decoded) ? $decoded : [];
 }
 
-function loadSeedDummyContent($slug) {
-    $path = __DIR__ . '/data/' . preg_replace('/[^a-z0-9_-]/i', '', $slug) . '-dummy-content.json';
-    if (!file_exists($path)) {
-        $path = __DIR__ . '/data/template4-dummy-content.json';
-    }
-    if (!file_exists($path)) return [];
-    return json_decode(file_get_contents($path), true) ?: [];
+function sectionKey($name) {
+    return strtolower(preg_replace('/[^a-z0-9]/i', '', (string)$name));
 }
 
-function dummyToSections($content) {
+function canonicalSectionName($name) {
+    $map = [
+        'header' => 'Header',
+        'hero' => 'Hero Slider',
+        'heroslider' => 'Hero Slider',
+        'herosection' => 'Hero Slider',
+        'features' => 'What we do',
+        'featurescarousel' => 'What we do',
+        'whatwedo' => 'What we do',
+        'about' => 'About Section',
+        'aboutsection' => 'About Section',
+        'aboutus' => 'About Section',
+        'history' => 'Company History',
+        'companyhistory' => 'Company History',
+        'services' => 'Featured Services',
+        'featuredservices' => 'Featured Services',
+        'annual' => 'Annual Progression',
+        'annualprogression' => 'Annual Progression',
+        'progression' => 'Annual Progression',
+        'portfolio' => 'Portfolio Section',
+        'portfoliosection' => 'Portfolio Section',
+        'branch' => 'Branches and Appointment',
+        'branches' => 'Branches and Appointment',
+        'appointment' => 'Branches and Appointment',
+        'branchesandappointment' => 'Branches and Appointment',
+        'stat' => 'Counter Stats',
+        'stats' => 'Counter Stats',
+        'counterstats' => 'Counter Stats',
+        'testimonial' => 'Testimonials Carousel',
+        'testimonials' => 'Testimonials Carousel',
+        'testimonialscarousel' => 'Testimonials Carousel',
+        'news' => 'Latest News',
+        'latestnews' => 'Latest News',
+        'logo' => 'Client Logos',
+        'logos' => 'Client Logos',
+        'clientlogos' => 'Client Logos',
+        'cta' => 'CTA Banner',
+        'banner' => 'CTA Banner',
+        'ctabanner' => 'CTA Banner',
+        'footer' => 'Footer',
+    ];
+    $key = sectionKey($name);
+    return $map[$key] ?? trim((string)$name);
+}
+
+function tableExists(PDO $pdo, $table) {
+    $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
+    $stmt->execute([$table]);
+    return (bool)$stmt->fetch();
+}
+
+function columnMap(PDO $pdo, $table) {
+    $cols = [];
+    try {
+        foreach ($pdo->query("SHOW COLUMNS FROM `{$table}`") as $row) {
+            $cols[strtolower($row['Field'])] = $row['Field'];
+        }
+    } catch (Exception $e) {
+        return [];
+    }
+    return $cols;
+}
+
+function ensureSectionMetaColumns(PDO $pdo) {
+    $cols = columnMap($pdo, 'sections');
+    if (!$cols) return;
+
+    $nameCol = $cols['section_name'] ?? $cols['name'] ?? null;
+    if (!isset($cols['display_name'])) {
+        $after = $nameCol ? " AFTER `{$nameCol}`" : '';
+        $pdo->exec("ALTER TABLE `sections` ADD COLUMN `display_name` VARCHAR(255) NULL{$after}");
+    }
+    if (!isset($cols['is_visible'])) {
+        $pdo->exec('ALTER TABLE `sections` ADD COLUMN `is_visible` TINYINT(1) NOT NULL DEFAULT 1');
+    }
+}
+
+function rowIsVisible(array $row) {
+    if (!array_key_exists('is_visible', $row)) return true;
+    $value = $row['is_visible'];
+    if ($value === null || $value === '') return true;
+    return !in_array($value, [false, 0, '0', 'false'], true);
+}
+
+function sectionKeyFromName($name) {
+    return strtolower(preg_replace('/[^a-z0-9]/i', '', (string)$name));
+}
+
+function canonicalSectionKey($name) {
+    $key = sectionKeyFromName(canonicalSectionName($name));
+    $map = [
+        'herosection' => 'heroslider',
+        'hero' => 'heroslider',
+        'features' => 'whatwedo',
+        'featurescarousel' => 'whatwedo',
+        'about' => 'aboutsection',
+        'aboutus' => 'aboutsection',
+        'history' => 'companyhistory',
+        'services' => 'featuredservices',
+        'annual' => 'annualprogression',
+        'progression' => 'annualprogression',
+        'portfolio' => 'portfoliosection',
+        'branches' => 'branchesandappointment',
+        'branch' => 'branchesandappointment',
+        'appointment' => 'branchesandappointment',
+        'stats' => 'counterstats',
+        'stat' => 'counterstats',
+        'testimonials' => 'testimonialscarousel',
+        'testimonial' => 'testimonialscarousel',
+        'news' => 'latestnews',
+        'logos' => 'clientlogos',
+        'logo' => 'clientlogos',
+        'cta' => 'ctabanner',
+        'banner' => 'ctabanner',
+    ];
+    return $map[$key] ?? $key;
+}
+
+function dedupeSectionRows(array $rows, $advisorId = null) {
+    $grouped = [];
+    foreach ($rows as $row) {
+        $name = canonicalSectionName($row['name'] ?? '');
+        if ($name === '') continue;
+        $grouped[$name][] = $row;
+    }
+
+    $deduped = [];
+    foreach ($grouped as $name => $group) {
+        if (count($group) === 1) {
+            $deduped[] = $group[0];
+            continue;
+        }
+
+        $chosen = null;
+        if ($advisorId !== null && $advisorId !== '') {
+            foreach ($group as $row) {
+                $rowAdvisor = $row['advisor_id'] ?? null;
+                if ($rowAdvisor !== null && (string)$rowAdvisor === (string)$advisorId) {
+                    $chosen = $row;
+                    break;
+                }
+            }
+        }
+
+        if (!$chosen) {
+            foreach ($group as $row) {
+                if (!$chosen) {
+                    $chosen = $row;
+                    continue;
+                }
+                $chosenRank = sectionContentRank(decodeSectionContent($chosen['content'] ?? null));
+                $rowRank = sectionContentRank(decodeSectionContent($row['content'] ?? null));
+                if ($rowRank > $chosenRank) {
+                    $chosen = $row;
+                }
+            }
+        }
+
+        $deduped[] = $chosen;
+    }
+
+    return $deduped;
+}
+
+function loadSeedSections() {
+    global $seedFile;
+    if (!file_exists($seedFile)) return [];
+    $raw = json_decode(file_get_contents($seedFile), true);
+    return is_array($raw) ? $raw : [];
+}
+
+function loadSavedDbConfig() {
+    global $dbConfigFile;
+    if (!file_exists($dbConfigFile)) return [];
+    $cfg = include $dbConfigFile;
+    return is_array($cfg) ? $cfg : [];
+}
+
+function persistDbConfig($cfg) {
+    global $dataDir, $dbConfigFile;
+    if (!file_exists($dataDir)) mkdir($dataDir, 0755, true);
+    $export = var_export([
+        'DB_HOST' => $cfg['DB_HOST'] ?? 'localhost',
+        'DB_NAME' => $cfg['DB_NAME'] ?? '',
+        'DB_USER' => $cfg['DB_USER'] ?? '',
+        'DB_PASS' => $cfg['DB_PASS'] ?? '',
+        'SECRET_API_KEY' => $cfg['SECRET_API_KEY'] ?? '',
+        'DEPLOYMENT_MODE' => $cfg['DEPLOYMENT_MODE'] ?? 'advisor',
+        'ADVISOR_ID' => $cfg['ADVISOR_ID'] ?? null,
+        'UPLOADS_ORIGIN' => $cfg['UPLOADS_ORIGIN'] ?? '',
+        'SITE_URL' => $cfg['SITE_URL'] ?? '',
+        'LARAVEL_API_URL' => $cfg['LARAVEL_API_URL'] ?? '',
+    ], true);
+    file_put_contents($dbConfigFile, "<?php\nreturn {$export};\n");
+}
+
+/**
+ * Write public/cpanel-config.php when Laravel dashboard deploys an advisor site.
+ */
+function persistCpanelConfigFile(array $cfg) {
+    global $manualConfigFile;
+    if (isPlaceholderDb($cfg['DB_NAME'] ?? '', $cfg['DB_USER'] ?? '')) {
+        return false;
+    }
+    $export = var_export([
+        'DEPLOYMENT_MODE' => $cfg['DEPLOYMENT_MODE'] ?? 'advisor',
+        'DB_HOST' => $cfg['DB_HOST'] ?? 'localhost',
+        'DB_NAME' => $cfg['DB_NAME'] ?? '',
+        'DB_USER' => $cfg['DB_USER'] ?? '',
+        'DB_PASS' => $cfg['DB_PASS'] ?? '',
+        'SECRET_API_KEY' => $cfg['SECRET_API_KEY'] ?? '',
+        'ADVISOR_ID' => $cfg['ADVISOR_ID'] ?? null,
+        'UPLOADS_ORIGIN' => $cfg['UPLOADS_ORIGIN'] ?? '',
+        'SITE_URL' => $cfg['SITE_URL'] ?? '',
+        'LARAVEL_API_URL' => $cfg['LARAVEL_API_URL'] ?? '',
+    ], true);
+    return (bool)file_put_contents($manualConfigFile, "<?php\n/**\n * Auto-written by Laravel deploy sync — do not commit.\n */\nreturn {$export};\n");
+}
+
+function isPlaceholderDb($name, $user) {
+    return empty($name) || empty($user)
+        || $name === 'YOUR_CPANEL_DB_NAME' || $user === 'YOUR_CPANEL_DB_USER'
+        || $name === 'YOUR_DB_NAME' || $user === 'YOUR_DB_USER';
+}
+
+function resolveDbConfig($input = null) {
+    global $DB_HOST, $DB_NAME, $DB_USER, $DB_PASS, $SECRET_API_KEY;
+    global $DEPLOYMENT_MODE, $ADVISOR_ID, $UPLOADS_ORIGIN, $SITE_URL, $LARAVEL_API_URL;
+
+    $saved = loadSavedDbConfig();
+    $cfg = [
+        'DB_HOST' => $saved['DB_HOST'] ?? $DB_HOST,
+        'DB_NAME' => $saved['DB_NAME'] ?? $DB_NAME,
+        'DB_USER' => $saved['DB_USER'] ?? $DB_USER,
+        'DB_PASS' => $saved['DB_PASS'] ?? $DB_PASS,
+        'SECRET_API_KEY' => $saved['SECRET_API_KEY'] ?? $SECRET_API_KEY,
+        'DEPLOYMENT_MODE' => $saved['DEPLOYMENT_MODE'] ?? $DEPLOYMENT_MODE,
+        'ADVISOR_ID' => array_key_exists('ADVISOR_ID', $saved) ? $saved['ADVISOR_ID'] : $ADVISOR_ID,
+        'UPLOADS_ORIGIN' => $saved['UPLOADS_ORIGIN'] ?? $UPLOADS_ORIGIN,
+        'SITE_URL' => $saved['SITE_URL'] ?? $SITE_URL,
+        'LARAVEL_API_URL' => $saved['LARAVEL_API_URL'] ?? $LARAVEL_API_URL,
+    ];
+
+    if (is_array($input)) {
+        $postName = $input['db_name'] ?? $input['cpanel_db_name'] ?? null;
+        $postUser = $input['db_user'] ?? $input['cpanel_db_user'] ?? null;
+        if ($postName && $postUser && !isPlaceholderDb($postName, $postUser)) {
+            $cfg['DB_HOST'] = $input['db_host'] ?? $input['cpanel_db_host'] ?? 'localhost';
+            $cfg['DB_NAME'] = $postName;
+            $cfg['DB_USER'] = $postUser;
+            $cfg['DB_PASS'] = $input['db_pass'] ?? $input['cpanel_db_pass'] ?? '';
+            if (!empty($input['api_key'])) {
+                $cfg['SECRET_API_KEY'] = $input['api_key'];
+            }
+        }
+        foreach (['deployment_mode', 'uploads_origin', 'site_url', 'laravel_api_url', 'advisor_id'] as $key) {
+            if (isset($input[$key]) && $input[$key] !== '') {
+                $cfg[strtoupper($key)] = $input[$key];
+            }
+        }
+    }
+
+    return $cfg;
+}
+
+function resolveDeploymentMode(array $cfg, PDO $pdo = null) {
+    $mode = strtolower(trim((string)($cfg['DEPLOYMENT_MODE'] ?? 'advisor')));
+    if ($pdo) {
+        try {
+            $stmt = $pdo->prepare("SELECT setting_value FROM site_settings WHERE setting_key = 'deployment_mode' LIMIT 1");
+            $stmt->execute();
+            $dbMode = $stmt->fetchColumn();
+            if ($dbMode) {
+                $mode = strtolower(trim((string)$dbMode));
+            }
+        } catch (Exception $e) {
+            // optional
+        }
+    }
+    return in_array($mode, ['showcase', 'advisor'], true) ? $mode : 'advisor';
+}
+
+function syncDeploymentSettings(PDO $pdo, array $cfg) {
+    $pairs = [
+        'deployment_mode' => $cfg['DEPLOYMENT_MODE'] ?? 'advisor',
+        'uploads_origin'  => $cfg['UPLOADS_ORIGIN'] ?? '',
+        'site_url'        => $cfg['SITE_URL'] ?? '',
+        'laravel_api_url' => $cfg['LARAVEL_API_URL'] ?? '',
+        'advisor_id'      => $cfg['ADVISOR_ID'] ?? '',
+    ];
+    $stmt = $pdo->prepare('REPLACE INTO site_settings (setting_key, setting_value) VALUES (?, ?)');
+    foreach ($pairs as $key => $value) {
+        if ($value !== null && $value !== '') {
+            $stmt->execute([$key, (string)$value]);
+        }
+    }
+}
+
+function saveSiteSetting(PDO $pdo, $key, $value) {
+    if ($value === null || $value === '') return;
+    $stmt = $pdo->prepare('REPLACE INTO site_settings (setting_key, setting_value) VALUES (?, ?)');
+    $stmt->execute([$key, (string)$value]);
+}
+
+$PDO_CONNECT_ERROR = null;
+
+function getPdoConnection($host, $name, $user, $pass, $deploymentMode = 'advisor') {
+    global $PDO_CONNECT_ERROR;
+    $PDO_CONNECT_ERROR = null;
+    if (isPlaceholderDb($name, $user)) {
+        $PDO_CONNECT_ERROR = 'MySQL credentials are placeholders. Create public/cpanel-config.php with this site\'s database credentials.';
+        return null;
+    }
+    try {
+        $pdo = new PDO("mysql:host={$host};dbname={$name};charset=utf8mb4", $user, $pass, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]);
+    } catch (Exception $e) {
+        $PDO_CONNECT_ERROR = $e->getMessage();
+        return null;
+    }
+
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `site_settings` (
+            `setting_key` VARCHAR(100) PRIMARY KEY,
+            `setting_value` TEXT NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+    } catch (Exception $e) {
+        // optional
+    }
+
+    if ($deploymentMode === 'advisor' && !tableExists($pdo, 'sections')) {
+        $pdo->exec("CREATE TABLE `sections` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `section_name` VARCHAR(255) NOT NULL UNIQUE,
+            `display_name` VARCHAR(255) NULL,
+            `is_visible` TINYINT(1) NOT NULL DEFAULT 1,
+            `content` LONGTEXT NOT NULL,
+            `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+        ensureSectionMetaColumns($pdo);
+
+        $cols = columnMap($pdo, 'sections');
+        $nameCol = $cols['section_name'] ?? $cols['name'] ?? null;
+        if ($nameCol) {
+            $count = (int)$pdo->query('SELECT COUNT(*) FROM `sections`')->fetchColumn();
+            if ($count === 0) {
+                $seed = loadSeedSections();
+                if ($seed) {
+                    $stmt = $pdo->prepare("INSERT INTO `sections` (`{$nameCol}`, `content`) VALUES (?, ?)");
+                    foreach ($seed as $sName => $sContent) {
+                        $stmt->execute([
+                            canonicalSectionName($sName),
+                            json_encode($sContent, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                        ]);
+                    }
+                }
+            }
+        }
+    }
+
+    return $pdo;
+}
+
+function fetchSectionRows(PDO $pdo, $advisorId = null) {
+    $cols = columnMap($pdo, 'sections');
+    if (!$cols) return [];
+
+    $nameCol = $cols['section_name'] ?? $cols['name'] ?? null;
+    $contentCol = $cols['content'] ?? null;
+    if (!$nameCol || !$contentCol) return [];
+
+    $hasAdvisor = isset($cols['advisor_id']);
+    $hasDisplayName = isset($cols['display_name']);
+    $hasVisible = isset($cols['is_visible']);
+    $sql = "SELECT `{$nameCol}` AS name, `{$contentCol}` AS content";
+    if ($hasDisplayName) $sql .= ', `display_name`';
+    if ($hasVisible) $sql .= ', `is_visible`';
+    if ($hasAdvisor) $sql .= ', `advisor_id`';
+    $sql .= ' FROM `sections`';
+
+    $params = [];
+    if ($hasAdvisor && $advisorId !== null && $advisorId !== '') {
+        $sql .= ' WHERE (`advisor_id` = ? OR `advisor_id` IS NULL)';
+        $params[] = $advisorId;
+    }
+
+    $sql .= $hasAdvisor ? ' ORDER BY (`advisor_id` IS NULL) ASC, `id` ASC' : ' ORDER BY `id` ASC';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll() ?: [];
+}
+
+function decodeSectionContent($cnt) {
+    if (is_string($cnt)) {
+        $decoded = json_decode($cnt, true);
+        return is_array($decoded) ? $decoded : $cnt;
+    }
+    return $cnt;
+}
+
+function sectionContentRank($cnt) {
+    if (!is_array($cnt)) return 0;
+    $rank = count($cnt);
+    if (!empty($cnt['boxes']) && is_array($cnt['boxes'])) $rank += 50 + count($cnt['boxes']);
+    if (!empty($cnt['slides']) && is_array($cnt['slides'])) $rank += 50 + count($cnt['slides']);
+    return $rank;
+}
+
+function rowsToSections(array $rows) {
     $sections = [];
     $list = [];
-    foreach ($content as $name => $secContent) {
-        $cnt = is_string($secContent) ? (json_decode($secContent, true) ?: $secContent) : $secContent;
-        $sections[$name] = $cnt;
-        $list[] = ['name' => $name, 'content' => $cnt];
+
+    foreach ($rows as $row) {
+        $name = canonicalSectionName($row['name'] ?? '');
+        if ($name === '') continue;
+
+        $visible = rowIsVisible($row);
+        $cnt = decodeSectionContent($row['content'] ?? null);
+        $label = !empty($row['display_name']) ? $row['display_name'] : $name;
+        $key = canonicalSectionKey($name);
+
+        $list[] = [
+            'name'         => $name,
+            'section_key'  => $key,
+            'display_name' => $label,
+            'is_visible'   => $visible,
+            'content'      => $visible ? $cnt : null,
+        ];
+
+        if (!$visible) continue;
+
+        if (!isset($sections[$name]) || sectionContentRank($cnt) > sectionContentRank($sections[$name])) {
+            $sections[$name] = $cnt;
+        }
     }
+
     return [$sections, $list];
 }
 
-function defaultWhatWeDoBoxes() {
-    return [
-        [
-            'image_url'   => 'intime-12',
-            'heading'     => 'Business & Strategy',
-            'text'        => "If you're looking for car insurance, we will help you to find the coverage that budget friendly.",
-            'button_text' => 'Read more',
-            'button_url'  => '#services',
-        ],
-        [
-            'image_url'   => 'intime-06',
-            'heading'     => 'Business Planner',
-            'text'        => "If you're looking for car insurance, we will help you to find the coverage that budget friendly.",
-            'button_text' => 'Read more',
-            'button_url'  => '#services',
-        ],
-        [
-            'image_url'   => 'intime-15',
-            'heading'     => 'Business Intelligence',
-            'text'        => "If you're looking for car insurance, we will help you to find the coverage that budget friendly.",
-            'button_text' => 'Read more',
-            'button_url'  => '#services',
-        ],
-    ];
+function upsertPublishedSection(PDO $pdo, $name, $content, $advisorId = null, $displayName = null, $isVisible = true) {
+    $cols = columnMap($pdo, 'sections');
+    $nameCol = $cols['section_name'] ?? $cols['name'] ?? null;
+    $contentCol = $cols['content'] ?? null;
+    if (!$nameCol || !$contentCol) {
+        throw new Exception('sections table is missing name/content columns');
+    }
+
+    $name = canonicalSectionName($name);
+    $json = is_string($content) ? $content : json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $hasAdvisor = isset($cols['advisor_id']);
+    $hasPage = isset($cols['page_id']);
+    $hasId = isset($cols['id']);
+    $hasDisplayName = isset($cols['display_name']);
+    $hasVisible = isset($cols['is_visible']);
+    $visibleValue = $isVisible ? 1 : 0;
+
+    $updated = 0;
+    if ($hasId) {
+        $select = "SELECT `id`, `{$nameCol}` AS name";
+        if ($hasAdvisor) $select .= ', `advisor_id`';
+        $select .= ' FROM `sections`';
+        $existing = $pdo->query($select)->fetchAll() ?: [];
+
+        $setParts = ["`{$contentCol}` = ?", "`{$nameCol}` = ?"];
+        $setValues = [$json, $name];
+        if ($hasDisplayName) { $setParts[] = '`display_name` = ?'; $setValues[] = $displayName ?: null; }
+        if ($hasVisible) { $setParts[] = '`is_visible` = ?'; $setValues[] = $visibleValue; }
+        $upd = $pdo->prepare('UPDATE `sections` SET ' . implode(', ', $setParts) . ' WHERE `id` = ?');
+
+        foreach ($existing as $row) {
+            if (canonicalSectionName($row['name'] ?? '') !== $name) continue;
+            if ($hasAdvisor && $advisorId !== null && $advisorId !== '') {
+                $rowAdvisor = $row['advisor_id'] ?? null;
+                if ($rowAdvisor !== null && (string)$rowAdvisor !== (string)$advisorId) continue;
+            }
+            $upd->execute(array_merge($setValues, [$row['id']]));
+            $updated++;
+        }
+        if ($updated > 0) return;
+    } else {
+        $find = $pdo->prepare("SELECT `{$nameCol}` FROM `sections` WHERE `{$nameCol}` = ? LIMIT 1");
+        $find->execute([$name]);
+        if ($find->fetchColumn()) {
+            $setParts = ["`{$contentCol}` = ?"];
+            $setValues = [$json];
+            if ($hasDisplayName) { $setParts[] = '`display_name` = ?'; $setValues[] = $displayName ?: null; }
+            if ($hasVisible) { $setParts[] = '`is_visible` = ?'; $setValues[] = $visibleValue; }
+            $upd = $pdo->prepare('UPDATE `sections` SET ' . implode(', ', $setParts) . " WHERE `{$nameCol}` = ?");
+            $setValues[] = $name;
+            $upd->execute($setValues);
+            return;
+        }
+    }
+
+    $fields = [$nameCol, $contentCol];
+    $values = [$name, $json];
+    if ($hasDisplayName) { $fields[] = 'display_name'; $values[] = $displayName ?: null; }
+    if ($hasVisible) { $fields[] = 'is_visible'; $values[] = $visibleValue; }
+    if ($hasAdvisor && $advisorId !== null && $advisorId !== '') {
+        $fields[] = 'advisor_id';
+        $values[] = $advisorId;
+    }
+    if ($hasPage) {
+        $pageId = 1;
+        try {
+            $pageId = $pdo->query("SELECT `id` FROM `pages` WHERE `slug` = 'home' LIMIT 1")->fetchColumn() ?: $pageId;
+        } catch (Exception $e) {}
+        $fields[] = 'page_id';
+        $values[] = $pageId;
+    }
+
+    $placeholders = implode(', ', array_fill(0, count($fields), '?'));
+    $fieldSql = '`' . implode('`, `', $fields) . '`';
+    $ins = $pdo->prepare("INSERT INTO `sections` ({$fieldSql}) VALUES ({$placeholders})");
+    $ins->execute($values);
 }
 
-function normalizeWhatWeDoContent($content) {
-    if (!is_array($content)) $content = [];
-    $defaults = defaultWhatWeDoBoxes();
-    $legacy = isset($content['eyebrow'], $content['subheading']) && !isset($content['text']) && !isset($content['boxes']);
+function updateSectionMetaOnly(PDO $pdo, $name, $displayName = null, $isVisible = true, $advisorId = null) {
+    $cols = columnMap($pdo, 'sections');
+    $nameCol = $cols['section_name'] ?? $cols['name'] ?? null;
+    if (!$nameCol) throw new Exception('sections table is missing name column');
+
+    $name = canonicalSectionName($name);
+    $hasAdvisor = isset($cols['advisor_id']);
+    $hasDisplayName = isset($cols['display_name']);
+    $hasVisible = isset($cols['is_visible']);
+    $hasId = isset($cols['id']);
+
+    $setParts = [];
+    $setValues = [];
+    if ($hasDisplayName) { $setParts[] = '`display_name` = ?'; $setValues[] = $displayName ?: null; }
+    if ($hasVisible) { $setParts[] = '`is_visible` = ?'; $setValues[] = $isVisible ? 1 : 0; }
+    if (!$setParts) return;
+
+    if ($hasId) {
+        $select = "SELECT `id`, `{$nameCol}` AS name";
+        if ($hasAdvisor) $select .= ', `advisor_id`';
+        $select .= ' FROM `sections`';
+        $existing = $pdo->query($select)->fetchAll() ?: [];
+        $upd = $pdo->prepare('UPDATE `sections` SET ' . implode(', ', $setParts) . ' WHERE `id` = ?');
+        foreach ($existing as $row) {
+            if (canonicalSectionName($row['name'] ?? '') !== $name) continue;
+            if ($hasAdvisor && $advisorId !== null && $advisorId !== '') {
+                $rowAdvisor = $row['advisor_id'] ?? null;
+                if ($rowAdvisor !== null && (string)$rowAdvisor !== (string)$advisorId) continue;
+            }
+            $upd->execute(array_merge($setValues, [$row['id']]));
+        }
+        return;
+    }
+
+    $upd = $pdo->prepare('UPDATE `sections` SET ' . implode(', ', $setParts) . " WHERE `{$nameCol}` = ?");
+    $setValues[] = $name;
+    $upd->execute($setValues);
+}
+
+function loadSiteSettings(PDO $pdo, array &$result) {
+    try {
+        $settingsStmt = $pdo->query('SELECT setting_key, setting_value FROM site_settings');
+        while ($row = $settingsStmt->fetch()) {
+            $result[$row['setting_key']] = $row['setting_value'];
+        }
+    } catch (Exception $e) {}
+}
+
+function loadJsonFallback(array &$result, $file) {
+    if (!file_exists($file)) return;
+    $fileData = json_decode(file_get_contents($file), true) ?: [];
+    if (!empty($fileData['primary_color'])) $result['primary_color'] = $fileData['primary_color'];
+    if (!empty($fileData['secondary_color'])) $result['secondary_color'] = $fileData['secondary_color'];
+    if (!empty($fileData['logo_url'])) $result['logo_url'] = $fileData['logo_url'];
+
+    if (!isset($fileData['sections']) || !is_array($fileData['sections'])) return;
+
+    $meta = isset($fileData['sections_meta']) && is_array($fileData['sections_meta']) ? $fileData['sections_meta'] : [];
     $list = [];
-    if (isset($content['boxes']) && is_array($content['boxes']) && count($content['boxes'])) {
-        $list = $content['boxes'];
-    } elseif (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
-        $list = $content['items'];
-    }
-    $boxes = [];
-    for ($i = 0; $i < 3; $i++) {
-        $item = $list[$i] ?? [];
-        $fallback = $defaults[$i];
-        $boxes[] = [
-            'image_url'   => $item['image_url'] ?? $item['img'] ?? $item['image'] ?? $fallback['image_url'],
-            'heading'     => $item['heading'] ?? $item['title'] ?? $fallback['heading'],
-            'text'        => $item['text'] ?? $item['desc'] ?? $fallback['text'],
-            'button_text' => $item['button_text'] ?? $item['read_more'] ?? $fallback['button_text'],
-            'button_url'  => $item['button_url'] ?? $item['url'] ?? $item['link'] ?? $fallback['button_url'],
+    foreach ($fileData['sections'] as $secName => $secContent) {
+        $name = canonicalSectionName($secName);
+        $sectionMeta = $meta[$name] ?? [];
+        $isVisible = !array_key_exists('is_visible', $sectionMeta) || !in_array($sectionMeta['is_visible'], [false, 0, '0', 'false'], true);
+        $cnt = is_string($secContent) ? (json_decode($secContent, true) ?: $secContent) : $secContent;
+        if ($isVisible) $result['sections'][$name] = $cnt;
+        $list[] = [
+            'name'         => $name,
+            'section_key'  => canonicalSectionKey($name),
+            'display_name' => $sectionMeta['display_name'] ?? $name,
+            'is_visible'   => $isVisible,
+            'content'      => $isVisible ? $cnt : null,
         ];
     }
-    return [
-        'subheading' => $legacy ? $content['eyebrow'] : ($content['subheading'] ?? $content['eyebrow'] ?? 'WHAT WE DO'),
-        'heading'    => $content['heading'] ?? 'We are the best agency to improve your deals.',
-        'text'       => $legacy ? $content['subheading'] : ($content['text'] ?? 'Improve efficiency, provide a better customer experience with modern technology services available around the world. Our skilled staff, combined with decades of experience.'),
-        'boxes'      => $boxes,
-    ];
+    $result['sections_list'] = $list;
+    $result['content_source'] = 'json_file';
 }
 
-function ensureWhatWeDoSection(&$content) {
-    $source = $content['What we do'] ?? $content['Features Carousel'] ?? null;
-    if ($source === null) return false;
-    $normalized = normalizeWhatWeDoContent(is_array($source) ? $source : []);
-    $changed = !isset($content['What we do'])
-        || isset($content['Features Carousel'])
-        || json_encode($content['What we do']) !== json_encode($normalized);
-    $content['What we do'] = $normalized;
-    unset($content['Features Carousel']);
-    return $changed;
+$rawInput = file_get_contents('php://input');
+$input = $_SERVER['REQUEST_METHOD'] === 'POST' ? (json_decode($rawInput, true) ?: []) : [];
+$dbCfg = resolveDbConfig($_SERVER['REQUEST_METHOD'] === 'POST' ? $input : null);
+if (!empty($dbCfg['SECRET_API_KEY'])) {
+    $SECRET_API_KEY = $dbCfg['SECRET_API_KEY'];
 }
 
-function defaultAboutGauges() {
-    return [
-        ['value' => '50%', 'label' => 'Business strategy growth'],
-        ['value' => '75%', 'label' => 'Finance valuable ideas'],
-    ];
+$deploymentMode = resolveDeploymentMode($dbCfg);
+$pdo = getPdoConnection($dbCfg['DB_HOST'], $dbCfg['DB_NAME'], $dbCfg['DB_USER'], $dbCfg['DB_PASS'], $deploymentMode);
+
+if ($pdo) {
+    syncDeploymentSettings($pdo, $dbCfg);
+    $deploymentMode = resolveDeploymentMode($dbCfg, $pdo);
 }
 
-function pickAboutText($content, $keys, $fallback = '') {
-    foreach ($keys as $key) {
-        if (!array_key_exists($key, $content)) continue;
-        $value = $content[$key];
-        if ($value === null || $value === '') continue;
-        if (is_array($value) || is_object($value)) continue;
-        return $value;
-    }
-    return $fallback;
-}
-
-function normalizeAboutContent($content) {
-    if (!is_array($content)) $content = [];
-    $defaults = defaultAboutGauges();
-    $list = [];
-    if (isset($content['gauges']) && is_array($content['gauges']) && count($content['gauges'])) {
-        $list = $content['gauges'];
-    } elseif (isset($content['stats']) && is_array($content['stats']) && count($content['stats'])) {
-        $list = $content['stats'];
-    }
-    $gauges = [];
-    for ($i = 0; $i < 2; $i++) {
-        $item = is_array($list[$i] ?? null) ? $list[$i] : [];
-        $n = $i + 1;
-        $fallback = $defaults[$i];
-        $gauges[] = [
-            'value' => $content["percent_{$n}"] ?? $content["percentage_{$n}"] ?? $item['value'] ?? $item['percentage'] ?? $item['pct'] ?? $fallback['value'],
-            'label' => $content["percent_{$n}_text"] ?? $content["percentage_{$n}_text"] ?? $item['label'] ?? $item['text'] ?? $item['heading'] ?? $fallback['label'],
-        ];
-    }
-    $image = $content['image_preview'] ?? $content['image_url'] ?? $content['image'] ?? $content['img'] ?? 'intime-04.jpg';
-    if (is_array($image)) {
-        $image = $image['url'] ?? $image['path'] ?? $image['relative_url'] ?? $image['src'] ?? 'intime-04.jpg';
-    }
-    return [
-        'eyebrow'          => $content['eyebrow'] ?? 'ABOUT US',
-        'heading'          => $content['heading'] ?? 'Why will you choose our?',
-        'subheading'       => $content['subheading'] ?? 'Our agency can only be as strong as our people & because of this, our team have designed game changing products.',
-        'text'             => $content['text'] ?? "Intime is a design studio founded in London. Nowadays, we've grown and expanded our services, and have become a multinational firm, offering a variety of services and solutions Worldwide.",
-        'image_url'        => $image,
-        'experience_years' => pickAboutText($content, ['experience_years', 'red_box_number', 'red_box', 'years'], '10+'),
-        'experience_label' => pickAboutText($content, ['experience_label', 'red_box_text', 'red_box_label'], 'Years of Experience'),
-        'gauges'           => $gauges,
-        'percent_1'        => $gauges[0]['value'],
-        'percent_1_text'   => $gauges[0]['label'],
-        'percent_2'        => $gauges[1]['value'],
-        'percent_2_text'   => $gauges[1]['label'],
-    ];
-}
-
-function ensureAboutSection(&$content) {
-    $source = $content['About Section'] ?? null;
-    if ($source === null) return false;
-    $normalized = normalizeAboutContent(is_array($source) ? $source : []);
-    $changed = json_encode($content['About Section']) !== json_encode($normalized);
-    $content['About Section'] = $normalized;
-    return $changed;
-}
-
-function defaultCompanyHistoryYears() {
-    return [
-        ['year' => '2010', 'red_text' => '2010 Milestone', 'grey_text' => 'Company Founded', 'heading' => 'Started Business', 'image_url' => 'intime-06.jpg', 'text' => "We partner with you to enable your technology so you focus on your organization's mission, leveraging our top-tier talent."],
-        ['year' => '2012', 'red_text' => '2012 Milestone', 'grey_text' => '10+ Key Partners', 'heading' => 'Resilience & Expansion', 'image_url' => 'intime-07.jpg', 'text' => 'A dedicated People Ops leader committed to the growth and continuous development of leaders across operations.'],
-        ['year' => '2016', 'red_text' => '2016 Milestone', 'grey_text' => '24/7 Support Launched', 'heading' => 'Crisis & Opportunity', 'image_url' => 'intime-09.jpg', 'text' => 'Our support works around the clock to ensure your business operations are secure, resilient, and monitored safely.'],
-        ['year' => '2017', 'red_text' => '2017 Milestone', 'grey_text' => '50+ Nationwide Branches', 'heading' => '50+ Branches Milestone', 'image_url' => 'intime-01.jpg', 'text' => 'We cross industries and provide services to almost every business either as a co-managed or supplemental asset.'],
-        ['year' => '2019', 'red_text' => '2019 Milestone', 'grey_text' => 'Global Market Entry', 'heading' => '100+ Global Branches', 'image_url' => 'intime-04.jpg', 'text' => 'Providing consulting expertise on vendor technology, IT budget strategy, and multi-cloud enterprise security.'],
-        ['year' => '2021', 'red_text' => '2021 Milestone', 'grey_text' => 'Top Enterprise Award', 'heading' => 'Industry Excellence Award', 'image_url' => 'intime-10.jpg', 'text' => 'Our team is held to the highest level of accountability to ensure exceptional satisfaction and proven results.'],
-    ];
-}
-
-function pickHistoryImage($item, $fallback) {
-    $image = $item['image_preview'] ?? $item['image_url'] ?? $item['image'] ?? $item['img'] ?? $fallback;
-    if (is_array($image)) {
-        $image = $image['url'] ?? $image['path'] ?? $image['relative_url'] ?? $image['src'] ?? $fallback;
-    }
-    return $image;
-}
-
-function normalizeCompanyHistoryContent($content) {
-    if (!is_array($content)) $content = [];
-    $defaults = defaultCompanyHistoryYears();
-    $legacy = isset($content['eyebrow'], $content['subheading']) && !isset($content['text']) && !isset($content['years']);
-    $list = [];
-    if (isset($content['years']) && is_array($content['years']) && count($content['years'])) {
-        $list = $content['years'];
-    } elseif (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
-        $list = $content['items'];
-    } elseif (isset($content['milestones']) && is_array($content['milestones']) && count($content['milestones'])) {
-        $list = $content['milestones'];
-    }
-    $years = [];
-    for ($i = 0; $i < 6; $i++) {
-        $item = is_array($list[$i] ?? null) ? $list[$i] : [];
-        $n = $i + 1;
-        $fallback = $defaults[$i];
-        $redText = $content["year_{$n}_red_text"] ?? $item['red_text'] ?? $item['milestone'] ?? $item['badge'] ?? (isset($item['year']) ? $item['year'] . ' Milestone' : $fallback['red_text']);
-        $year = $content["year_{$n}"] ?? $item['year'] ?? $fallback['year'];
-        $years[] = [
-            'year'      => $year,
-            'red_text'  => $redText,
-            'grey_text' => $content["year_{$n}_grey_text"] ?? $item['grey_text'] ?? $item['highlight'] ?? $item['caption'] ?? $fallback['grey_text'],
-            'heading'   => $content["year_{$n}_heading"] ?? $item['heading'] ?? $item['title'] ?? $fallback['heading'],
-            'image_url' => pickHistoryImage(array_merge($item, [
-                'image_preview' => $content["year_{$n}_image_preview"] ?? ($item['image_preview'] ?? null),
-                'image_url'     => $content["year_{$n}_image"] ?? $content["year_{$n}_image_url"] ?? ($item['image_url'] ?? null),
-            ]), $fallback['image_url']),
-            'text'      => $content["year_{$n}_text"] ?? $item['text'] ?? $item['desc'] ?? $item['description'] ?? $fallback['text'],
-        ];
-    }
-    return [
-        'subheading' => $legacy ? ($content['eyebrow'] ?? 'OUR JOURNEY') : ($content['subheading'] ?? $content['eyebrow'] ?? 'OUR JOURNEY'),
-        'heading'    => $content['heading'] ?? 'Our Company History',
-        'text'       => $legacy ? ($content['subheading'] ?? '') : ($content['text'] ?? 'A decade of growth, innovation, and unwavering commitment to client success.'),
-        'years'      => $years,
-    ];
-}
-
-function ensureCompanyHistorySection(&$content) {
-    $source = $content['Company History'] ?? null;
-    if ($source === null) return false;
-    $normalized = normalizeCompanyHistoryContent(is_array($source) ? $source : []);
-    $changed = json_encode($content['Company History']) !== json_encode($normalized);
-    $content['Company History'] = $normalized;
-    return $changed;
-}
-
-function defaultFeaturedServiceBoxes() {
-    return [
-        ['icon' => 'chart-pie', 'heading' => 'Strategy & Planning', 'text' => 'Collaborate Consulting exists to find the place where being seeming disparate interests meet.', 'button_text' => 'Read more', 'button_url' => '#service-strategy-planning'],
-        ['icon' => 'tasks', 'heading' => 'Program Manager', 'text' => 'Collaborate Consulting exists to find the place where being seeming disparate interests meet.', 'button_text' => 'Read more', 'button_url' => '#service-program-manager'],
-        ['icon' => 'landmark', 'heading' => 'Tax Management', 'text' => 'Collaborate Consulting exists to find the place where being seeming disparate interests meet.', 'button_text' => 'Read more', 'button_url' => '#service-tax-management'],
-        ['icon' => 'coins', 'heading' => 'Investment Policy', 'text' => 'Collaborate Consulting exists to find the place where being seeming disparate interests meet.', 'button_text' => 'Read more', 'button_url' => '#service-investment-policy'],
-        ['icon' => 'holding', 'heading' => 'Financial Advices', 'text' => 'Collaborate Consulting exists to find the place where being seeming disparate interests meet.', 'button_text' => 'Read more', 'button_url' => '#service-financial-advices'],
-        ['icon' => 'seedling', 'heading' => 'Business Growth Plan', 'text' => 'Collaborate Consulting exists to find the place where being seeming disparate interests meet.', 'button_text' => 'Read more', 'button_url' => '#service-business-growth-plan'],
-    ];
-}
-
-function normalizeFeaturedServicesContent($content) {
-    if (!is_array($content)) $content = [];
-    $defaults = defaultFeaturedServiceBoxes();
-    $list = [];
-    if (isset($content['boxes']) && is_array($content['boxes']) && count($content['boxes'])) {
-        $list = $content['boxes'];
-    } elseif (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
-        $list = $content['items'];
-    }
-    $boxes = [];
-    for ($i = 0; $i < 6; $i++) {
-        $item = is_array($list[$i] ?? null) ? $list[$i] : [];
-        $fallback = $defaults[$i];
-        $boxes[] = [
-            'icon'        => $item['icon'] ?? $fallback['icon'],
-            'heading'     => $item['heading'] ?? $item['title'] ?? $fallback['heading'],
-            'text'        => $item['text'] ?? $item['desc'] ?? $fallback['text'],
-            'button_text' => $item['button_text'] ?? $item['read_more'] ?? $fallback['button_text'],
-            'button_url'  => $item['button_url'] ?? $item['url'] ?? $item['link'] ?? (isset($item['slug']) ? '#service-' . $item['slug'] : $fallback['button_url']),
-        ];
-    }
-    return [
-        'subheading' => $content['subheading'] ?? 'FEATURED SERVICES',
-        'heading'    => $content['heading'] ?? 'We help to get Solutions!',
-        'text'       => $content['text'] ?? 'Provide users with appropriate view and access permissions to requests, problems, changes, contracts, assets, solutions',
-        'boxes'      => $boxes,
-    ];
-}
-
-function ensureFeaturedServicesSection(&$content) {
-    $source = $content['Featured Services'] ?? null;
-    if ($source === null) return false;
-    $normalized = normalizeFeaturedServicesContent(is_array($source) ? $source : []);
-    $changed = json_encode($content['Featured Services']) !== json_encode($normalized);
-    $content['Featured Services'] = $normalized;
-    return $changed;
-}
-
-function parseProgressPct($value, $fallback) {
-    if (is_numeric($value)) return max(0, min(100, (int)$value));
-    if (is_string($value) && preg_match('/(\d+)/', $value, $m)) {
-        return max(0, min(100, (int)$m[1]));
-    }
-    return $fallback;
-}
-
-function defaultAnnualProgressionBars() {
-    return [
-        ['label' => 'Business growth', 'year' => '2018', 'pct' => 70],
-        ['label' => 'Investment growth', 'year' => '2019', 'pct' => 80],
-        ['label' => 'Financial growth', 'year' => '2020', 'pct' => 90],
-    ];
-}
-
-function defaultAnnualProgressionHighlights() {
-    return [
-        ['icon' => 'shield-alt', 'heading' => 'Risk Free', 'text' => 'We offer risk free business for tension free life.'],
-        ['icon' => 'chart-line', 'heading' => 'Business Growth', 'text' => 'We ensure the business growth without conditions.'],
-    ];
-}
-
-function normalizeAnnualProgressionContent($content) {
-    if (!is_array($content)) $content = [];
-    $legacy = isset($content['eyebrow'], $content['subheading']) && !isset($content['text']);
-    $barDefaults = defaultAnnualProgressionBars();
-    $highlightDefaults = defaultAnnualProgressionHighlights();
-    $barList = [];
-    if (isset($content['bars']) && is_array($content['bars']) && count($content['bars'])) {
-        $barList = $content['bars'];
-    } elseif (isset($content['progress']) && is_array($content['progress']) && count($content['progress'])) {
-        $barList = $content['progress'];
-    }
-    $highlightList = [];
-    if (isset($content['highlights']) && is_array($content['highlights']) && count($content['highlights'])) {
-        $highlightList = $content['highlights'];
-    } elseif (isset($content['features']) && is_array($content['features']) && count($content['features'])) {
-        $highlightList = $content['features'];
-    }
-    $bars = [];
-    for ($i = 0; $i < 3; $i++) {
-        $item = is_array($barList[$i] ?? null) ? $barList[$i] : [];
-        $fallback = $barDefaults[$i];
-        $bars[] = [
-            'label' => $item['label'] ?? $item['heading'] ?? $item['title'] ?? $fallback['label'],
-            'year'  => $item['year'] ?? $fallback['year'],
-            'pct'   => parseProgressPct($item['pct'] ?? $item['percent'] ?? $item['value'] ?? $item['percentage'] ?? null, $fallback['pct']),
-        ];
-    }
-    $highlights = [];
-    for ($i = 0; $i < 2; $i++) {
-        $item = is_array($highlightList[$i] ?? null) ? $highlightList[$i] : [];
-        $fallback = $highlightDefaults[$i];
-        $highlights[] = [
-            'icon'    => $item['icon'] ?? $fallback['icon'],
-            'heading' => $item['heading'] ?? $item['title'] ?? $fallback['heading'],
-            'text'    => $item['text'] ?? $item['desc'] ?? $item['description'] ?? $fallback['text'],
-        ];
-    }
-    return [
-        'subheading' => $legacy ? ($content['eyebrow'] ?? 'ANNUAL PROGRESSION') : ($content['subheading'] ?? $content['eyebrow'] ?? 'ANNUAL PROGRESSION'),
-        'heading'    => $content['heading'] ?? 'Our Business Growth is Really Incredible!',
-        'text'       => $legacy ? ($content['subheading'] ?? '') : ($content['text'] ?? 'We love what we do and we do it with passion. We value the experimentation, the reformation of the message, and the smart incentives.'),
-        'bars'       => $bars,
-        'highlights' => $highlights,
-    ];
-}
-
-function ensureAnnualProgressionSection(&$content) {
-    $source = $content['Annual Progression'] ?? null;
-    if ($source === null) return false;
-    $normalized = normalizeAnnualProgressionContent(is_array($source) ? $source : []);
-    $changed = json_encode($content['Annual Progression']) !== json_encode($normalized);
-    $content['Annual Progression'] = $normalized;
-    return $changed;
-}
-
-function defaultPortfolioItems() {
-    return [
-        ['heading' => 'Market Expansion', 'category' => 'Business Strategy', 'image_url' => 'intime-12.jpg', 'button_text' => 'Read more', 'button_url' => '#portfolio'],
-        ['heading' => 'Business Growth', 'category' => 'Investment', 'image_url' => 'intime-11.jpg', 'button_text' => 'Read more', 'button_url' => '#portfolio'],
-        ['heading' => 'Tax Management', 'category' => 'Tax Consulting', 'image_url' => 'intime-08.jpg', 'button_text' => 'Read more', 'button_url' => '#portfolio'],
-        ['heading' => 'Investment Policy', 'category' => 'Business Strategy', 'image_url' => 'intime-10.jpg', 'button_text' => 'Read more', 'button_url' => '#portfolio'],
-        ['heading' => 'Manage Investment', 'category' => 'Investment', 'image_url' => 'intime-04.jpg', 'button_text' => 'Read more', 'button_url' => '#portfolio'],
-        ['heading' => 'Financial Advices', 'category' => 'Tax Consulting', 'image_url' => 'intime-01.jpg', 'button_text' => 'Read more', 'button_url' => '#portfolio'],
-    ];
-}
-
-function pickPortfolioImage($item, $fallback) {
-    $image = $item['image_preview'] ?? $item['image_url'] ?? $item['image'] ?? $item['img'] ?? $fallback;
-    if (is_array($image)) {
-        $image = $image['url'] ?? $image['path'] ?? $image['relative_url'] ?? $image['src'] ?? $fallback;
-    }
-    return $image;
-}
-
-function normalizePortfolioContent($content) {
-    if (!is_array($content)) $content = [];
-    $legacy = isset($content['eyebrow'], $content['subheading']) && !isset($content['items']);
-    $defaults = defaultPortfolioItems();
-    $list = [];
-    if (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
-        $list = $content['items'];
-    } elseif (isset($content['projects']) && is_array($content['projects']) && count($content['projects'])) {
-        $list = $content['projects'];
-    } elseif (isset($content['boxes']) && is_array($content['boxes']) && count($content['boxes'])) {
-        $list = $content['boxes'];
-    }
-    $items = [];
-    for ($i = 0; $i < 6; $i++) {
-        $item = is_array($list[$i] ?? null) ? $list[$i] : [];
-        $fallback = $defaults[$i];
-        $items[] = [
-            'heading'     => $item['heading'] ?? $item['title'] ?? $fallback['heading'],
-            'category'    => $item['category'] ?? $item['cat'] ?? $item['caption'] ?? $fallback['category'],
-            'image_url'   => pickPortfolioImage($item, $fallback['image_url']),
-            'button_text' => $item['button_text'] ?? $item['read_more'] ?? $fallback['button_text'],
-            'button_url'  => $item['button_url'] ?? $item['url'] ?? $item['link'] ?? $fallback['button_url'],
-        ];
-    }
-    return [
-        'subheading' => $legacy ? ($content['eyebrow'] ?? 'COMPLETED PROJECTS') : ($content['subheading'] ?? $content['eyebrow'] ?? 'COMPLETED PROJECTS'),
-        'heading'    => $content['heading'] ?? 'You can check our projects as inspirations.',
-        'items'      => $items,
-    ];
-}
-
-function ensurePortfolioSection(&$content) {
-    $source = $content['Portfolio Section'] ?? null;
-    if ($source === null) return false;
-    $normalized = normalizePortfolioContent(is_array($source) ? $source : []);
-    $changed = json_encode($content['Portfolio Section']) !== json_encode($normalized);
-    $content['Portfolio Section'] = $normalized;
-    return $changed;
-}
-
-function defaultBranchItems() {
-    return [
-        ['name' => 'Sydney (Head Office)', 'address' => '1 Epping Road, North Ryde, NSW 2113', 'phone' => '+61 2 9870 7689', 'email' => 'email@example.com'],
-        ['name' => 'Brisbane', 'address' => 'Level 28, 400 George Street, Brisbane, QLD 4000', 'phone' => '+61 2 9870 7689', 'email' => 'email@example.com'],
-        ['name' => 'Hobart', 'address' => '85 Macquarie Finoa Street, Hobart, TAS 7000', 'phone' => '+61 2 9870 7689', 'email' => 'email@example.com'],
-        ['name' => 'Melbourne', 'address' => 'Level 5, 4 Freshwater Place, Southbank, VIC 3006', 'phone' => '+61 2 9870 7689', 'email' => 'email@example.com'],
-    ];
-}
-
-function pickBranchMapImage($content) {
-    $image = $content['image_preview'] ?? $content['map_image'] ?? $content['image_url'] ?? $content['image'] ?? $content['img'] ?? 'maps-point.png';
-    if (is_array($image)) {
-        $image = $image['url'] ?? $image['path'] ?? $image['relative_url'] ?? $image['src'] ?? 'maps-point.png';
-    }
-    return $image;
-}
-
-function normalizeBranchesContent($content) {
-    if (!is_array($content)) $content = [];
-    $legacyLabel = isset($content['eyebrow']);
-    $defaults = defaultBranchItems();
-    $list = [];
-    if (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
-        $list = $content['items'];
-    } elseif (isset($content['branches']) && is_array($content['branches']) && count($content['branches'])) {
-        $list = $content['branches'];
-    } elseif (isset($content['offices']) && is_array($content['offices']) && count($content['offices'])) {
-        $list = $content['offices'];
-    }
-    $items = [];
-    for ($i = 0; $i < 4; $i++) {
-        $item = is_array($list[$i] ?? null) ? $list[$i] : [];
-        $fallback = $defaults[$i];
-        $items[] = [
-            'name'    => $item['name'] ?? $item['heading'] ?? $item['title'] ?? $fallback['name'],
-            'address' => $item['address'] ?? $fallback['address'],
-            'phone'   => $item['phone'] ?? $item['tel'] ?? $fallback['phone'],
-            'email'   => $item['email'] ?? $fallback['email'],
-        ];
-    }
-    return [
-        'subheading'     => $legacyLabel ? ($content['eyebrow'] ?? 'GET IN TOUCH') : ($content['subheading'] ?? 'GET IN TOUCH'),
-        'heading'        => $content['heading'] ?? 'We are Connected All Time to Help Your Business!',
-        'text'           => $legacyLabel ? ($content['text'] ?? $content['subheading'] ?? 'We understand the importance of approaching each work integrally and believe in the power of simple and easy communication.') : ($content['text'] ?? 'We understand the importance of approaching each work integrally and believe in the power of simple and easy communication.'),
-        'form_heading'   => $content['form_heading'] ?? 'Book an appionment',
-        'button_text'    => $content['button_text'] ?? 'SEND YOUR MESSAGE',
-        'branches_label' => $content['branches_label'] ?? 'Main Branches:',
-        'stat_value'     => $content['stat_value'] ?? '12+',
-        'stat_label'     => $content['stat_label'] ?? 'Branches',
-        'map_image'      => pickBranchMapImage($content),
-        'items'          => $items,
-    ];
-}
-
-function ensureBranchesSection(&$content) {
-    $source = $content['Branches and Appointment'] ?? null;
-    if ($source === null) return false;
-    $normalized = normalizeBranchesContent(is_array($source) ? $source : []);
-    $changed = json_encode($content['Branches and Appointment']) !== json_encode($normalized);
-    $content['Branches and Appointment'] = $normalized;
-    return $changed;
-}
-
-function defaultCounterStats() {
-    return [
-        ['icon' => 'users', 'value' => '2,800+', 'label' => 'Active Clients', 'sub' => 'Empowering businesses globally with passion and proven expertise.'],
-        ['icon' => 'star', 'value' => '1,670+', 'label' => '5-Star Reviews', 'sub' => 'Top customer satisfaction and unmatched quality of service.'],
-        ['icon' => 'user-tie', 'value' => '106+', 'label' => 'Team Members', 'sub' => 'Dedicated specialists and leaders driving continuous innovation.'],
-        ['icon' => 'award', 'value' => '99.8%', 'label' => 'Success Rate', 'sub' => 'Consistently delivering top-tier performance and business growth.'],
-    ];
-}
-
-function normalizeCounterStatsContent($content) {
-    if (!is_array($content)) $content = [];
-    $defaults = defaultCounterStats();
-    $list = [];
-    if (isset($content['stats']) && is_array($content['stats']) && count($content['stats'])) {
-        $list = $content['stats'];
-    } elseif (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
-        $list = $content['items'];
-    }
-    $stats = [];
-    for ($i = 0; $i < 4; $i++) {
-        $item = is_array($list[$i] ?? null) ? $list[$i] : [];
-        $fallback = $defaults[$i];
-        $n = $i + 1;
-        $stats[] = [
-            'icon'  => $item['icon'] ?? $content["stat_{$n}_icon"] ?? $fallback['icon'],
-            'value' => $item['value'] ?? $item['number'] ?? $content["stat_{$n}_value"] ?? $fallback['value'],
-            'label' => $item['label'] ?? $item['title'] ?? $item['heading'] ?? $content["stat_{$n}_label"] ?? $fallback['label'],
-            'sub'   => $item['sub'] ?? $item['desc'] ?? $item['description'] ?? $item['text'] ?? $content["stat_{$n}_sub"] ?? $fallback['sub'],
-        ];
-    }
-    return ['stats' => $stats];
-}
-
-function ensureCounterStatsSection(&$content) {
-    $source = $content['Counter Stats'] ?? null;
-    if ($source === null) return false;
-    $normalized = normalizeCounterStatsContent(is_array($source) ? $source : []);
-    $changed = json_encode($content['Counter Stats']) !== json_encode($normalized);
-    $content['Counter Stats'] = $normalized;
-    return $changed;
-}
-
-function defaultTestimonialItems() {
-    return [
-        ['quote' => 'Working with several word press themes and templates the last years, I only can say this is the best in every level. I use it for my company and the reviews that I have already are all excellent.', 'name' => 'Alina Lora', 'role' => 'Former Manager, Intime', 'image_url' => 'testimonial-01.jpg'],
-        ['quote' => 'This is one of the BEST THEMES I have ever worked with. The extra bells and whistles added to it are amazing. Elementor features add extra flavor. The customer support is very responsive.', 'name' => 'Rohan Jho', 'role' => 'Former Manager, Intime', 'image_url' => 'testimonial-02.jpg'],
-        ['quote' => 'Great theme, one of the best I have worked with in a while. Full featured and great support for the minor issues I had which were really my not being skilled/experienced enough.', 'name' => 'Donald Frew', 'role' => 'Former Manager, Intime', 'image_url' => 'testimonial-03.jpg'],
-    ];
-}
-
-function pickTestimonialSideImage($content) {
-    $image = $content['image_preview'] ?? $content['image_url'] ?? $content['image'] ?? $content['img'] ?? $content['side_image'] ?? 'intime-17.jpg';
-    if (is_array($image)) {
-        $image = $image['url'] ?? $image['path'] ?? $image['relative_url'] ?? $image['src'] ?? 'intime-17.jpg';
-    }
-    return $image;
-}
-
-function normalizeTestimonialsContent($content) {
-    if (!is_array($content)) $content = [];
-    $defaults = defaultTestimonialItems();
-    $list = [];
-    if (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
-        $list = $content['items'];
-    } elseif (isset($content['testimonials']) && is_array($content['testimonials']) && count($content['testimonials'])) {
-        $list = $content['testimonials'];
-    }
-    $legacyThin = isset($content['eyebrow']) && isset($content['heading']) && !count($list);
-    $reviewsLabel = $content['reviews_label'] ?? $content['label'] ?? ($legacyThin && strlen($content['subheading'] ?? '') > 40 ? 'Clients Reviews:' : ($content['subheading'] ?? 'Clients Reviews:'));
-    $items = [];
-    for ($i = 0; $i < 3; $i++) {
-        $item = is_array($list[$i] ?? null) ? $list[$i] : [];
-        $fallback = $defaults[$i];
-        $items[] = [
-            'quote'     => $item['quote'] ?? $item['text'] ?? $item['review'] ?? $fallback['quote'],
-            'name'      => $item['name'] ?? $item['title'] ?? $item['author'] ?? $fallback['name'],
-            'role'      => $item['role'] ?? $item['position'] ?? $item['job'] ?? $item['desc'] ?? $fallback['role'],
-            'image_url' => $item['image_url'] ?? $item['image'] ?? $item['img'] ?? $item['avatar'] ?? $fallback['image_url'],
-        ];
-    }
-    return [
-        'eyebrow'    => $content['eyebrow'] ?? $content['tagline'] ?? "CLIENT'S TESTIMONIALS",
-        'heading'    => $content['heading'] ?? "We are Very Happy to Get Our Client's Reviews.",
-        'subheading' => $reviewsLabel,
-        'image_url'  => pickTestimonialSideImage($content),
-        'items'      => $items,
-    ];
-}
-
-function ensureTestimonialsSection(&$content) {
-    $source = $content['Testimonials Carousel'] ?? null;
-    if ($source === null) return false;
-    $normalized = normalizeTestimonialsContent(is_array($source) ? $source : []);
-    $changed = json_encode($content['Testimonials Carousel']) !== json_encode($normalized);
-    $content['Testimonials Carousel'] = $normalized;
-    return $changed;
-}
-
-function defaultLatestNewsItems() {
-    return [
-        ['date' => '10', 'month' => 'Nov, 20', 'author' => 'John Doe', 'cat' => 'Consulting', 'title' => 'We would love to share a similar experience', 'excerpt' => 'The theory was first published in 2008 a press released under the name of Cliff Arnall, who at the time was a tutor at the…', 'image_url' => 'intime-03.jpg', 'button_text' => 'Read more', 'button_url' => '#news'],
-        ['date' => '06', 'month' => 'Nov, 20', 'author' => 'John Doe', 'cat' => 'HR Consulting', 'title' => 'We glad to discuss your organisation situation.', 'excerpt' => 'The theory was first published in 2008 a press released under the name of Cliff Arnall, who at the time was a tutor at the…', 'image_url' => 'intime-02.jpg', 'button_text' => 'Read more', 'button_url' => '#news'],
-        ['date' => '20', 'month' => 'Oct, 20', 'author' => 'John Doe', 'cat' => 'Consulting', 'title' => 'In this context our main approach was to build.', 'excerpt' => 'The theory was first published in 2008 a press released under the name of Cliff Arnall, who at the time was a tutor at the…', 'image_url' => 'intime-05.jpg', 'button_text' => 'Read more', 'button_url' => '#news'],
-    ];
-}
-
-function normalizeLatestNewsContent($content) {
-    if (!is_array($content)) $content = [];
-    $defaults = defaultLatestNewsItems();
-    $list = [];
-    if (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
-        $list = $content['items'];
-    } elseif (isset($content['posts']) && is_array($content['posts']) && count($content['posts'])) {
-        $list = $content['posts'];
-    }
-    $items = [];
-    for ($i = 0; $i < 3; $i++) {
-        $item = is_array($list[$i] ?? null) ? $list[$i] : [];
-        $fallback = $defaults[$i];
-        $items[] = [
-            'date'        => $item['date'] ?? $item['day'] ?? $fallback['date'],
-            'month'       => $item['month'] ?? $item['month_label'] ?? $fallback['month'],
-            'author'      => $item['author'] ?? $item['by'] ?? $fallback['author'],
-            'cat'         => $item['cat'] ?? $item['category'] ?? $item['tag'] ?? $fallback['cat'],
-            'title'       => $item['title'] ?? $item['heading'] ?? $fallback['title'],
-            'excerpt'     => $item['excerpt'] ?? $item['text'] ?? $item['desc'] ?? $item['description'] ?? $fallback['excerpt'],
-            'image_url'   => $item['image_url'] ?? $item['image'] ?? $item['img'] ?? $fallback['image_url'],
-            'button_text' => $item['button_text'] ?? $item['read_more'] ?? $fallback['button_text'],
-            'button_url'  => $item['button_url'] ?? $item['url'] ?? $item['link'] ?? $fallback['button_url'],
-        ];
-    }
-    return [
-        'eyebrow' => $content['eyebrow'] ?? $content['tagline'] ?? 'OUR LATEST NEWS',
-        'heading' => $content['heading'] ?? 'Learn about our latest news from blog.',
-        'items'   => $items,
-    ];
-}
-
-function ensureLatestNewsSection(&$content) {
-    $source = $content['Latest News'] ?? null;
-    if ($source === null) return false;
-    $normalized = normalizeLatestNewsContent(is_array($source) ? $source : []);
-    $changed = json_encode($content['Latest News']) !== json_encode($normalized);
-    $content['Latest News'] = $normalized;
-    return $changed;
-}
-
-function defaultClientLogoItems() {
-    return [
-        ['name' => 'slack', 'image_url' => ''],
-        ['name' => 'Google', 'image_url' => ''],
-        ['name' => 'envato', 'image_url' => ''],
-        ['name' => 'Sketch', 'image_url' => ''],
-        ['name' => 'Figma', 'image_url' => ''],
-    ];
-}
-
-function normalizeClientLogosContent($content) {
-    if (!is_array($content)) $content = [];
-    $defaults = defaultClientLogoItems();
-    $list = [];
-    if (isset($content['items']) && is_array($content['items']) && count($content['items'])) {
-        $list = $content['items'];
-    } elseif (isset($content['logos']) && is_array($content['logos']) && count($content['logos'])) {
-        $list = $content['logos'];
-    }
-    $items = [];
-    for ($i = 0; $i < 5; $i++) {
-        $raw = $list[$i] ?? null;
-        $item = is_string($raw) ? ['name' => $raw] : (is_array($raw) ? $raw : []);
-        $fallback = $defaults[$i];
-        $items[] = [
-            'name'      => $item['name'] ?? $item['label'] ?? $item['title'] ?? $item['text'] ?? $fallback['name'],
-            'image_url' => $item['image_url'] ?? $item['image'] ?? $item['img'] ?? $item['logo'] ?? $fallback['image_url'],
-        ];
-    }
-    return ['items' => $items];
-}
-
-function ensureClientLogosSection(&$content) {
-    $source = $content['Client Logos'] ?? null;
-    if ($source === null) return false;
-    $normalized = normalizeClientLogosContent(is_array($source) ? $source : []);
-    $changed = json_encode($content['Client Logos']) !== json_encode($normalized);
-    $content['Client Logos'] = $normalized;
-    return $changed;
-}
-
-function normalizeCtaBannerContent($content) {
-    if (!is_array($content)) $content = [];
-    return [
-        'heading'     => $content['heading'] ?? $content['title'] ?? 'Looking for the Best Business Consulting?',
-        'subheading'  => $content['subheading'] ?? $content['text'] ?? $content['desc'] ?? $content['description'] ?? 'As a web crawler expert, we will help to organize.',
-        'button_text' => $content['button_text'] ?? $content['btn_text'] ?? $content['button'] ?? 'GET A QUOTE',
-        'button_url'  => $content['button_url'] ?? $content['btn_url'] ?? $content['url'] ?? $content['link'] ?? '#appointment',
-    ];
-}
-
-function ensureCtaBannerSection(&$content) {
-    $source = $content['CTA Banner'] ?? null;
-    if ($source === null) return false;
-    $normalized = normalizeCtaBannerContent(is_array($source) ? $source : []);
-    $changed = json_encode($content['CTA Banner']) !== json_encode($normalized);
-    $content['CTA Banner'] = $normalized;
-    return $changed;
-}
-
-$pdo = getPdoConnection($DB_HOST, $DB_NAME, $DB_USER, $DB_PASS);
-
-// --------------------------------------------------------------------------
-// POST REQUEST: SYNC CONTENT FROM LARAVEL BACKEND
-// --------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $rawInput = file_get_contents('php://input');
-    $input = json_decode($rawInput, true);
-
     if (!$input) {
         http_response_code(400);
         echo json_encode(['status' => 'error', 'message' => 'Invalid JSON payload']);
         exit;
     }
 
-    // Validate Secret API Key (if configured)
-    if (!empty($SECRET_API_KEY) && $SECRET_API_KEY !== "YOUR_SECRET_KEY") {
-        $providedKey = $input['api_key'] 
-            ?? $_SERVER['HTTP_X_API_KEY'] 
-            ?? null;
-
+    if (!empty($SECRET_API_KEY) && $SECRET_API_KEY !== 'YOUR_SECRET_KEY') {
+        $providedKey = $input['api_key'] ?? $_SERVER['HTTP_X_API_KEY'] ?? null;
         if (!$providedKey && isset($_SERVER['HTTP_AUTHORIZATION'])) {
             if (preg_match('/Bearer\s+(.*)$/i', $_SERVER['HTTP_AUTHORIZATION'], $matches)) {
                 $providedKey = $matches[1];
             }
         }
-
         if ($providedKey !== $SECRET_API_KEY) {
             http_response_code(401);
-            echo json_encode([
-                'status'  => 'error', 
-                'message' => 'Unauthorized: Invalid API Key. Provided key does not match cPanel secret key.'
-            ]);
+            echo json_encode(['status' => 'error', 'message' => 'Unauthorized: Invalid API Key.']);
             exit;
         }
     }
 
     $updatedSectionsCount = 0;
+    $advisorId = $input['advisor_id'] ?? ($_GET['advisor_id'] ?? $dbCfg['ADVISOR_ID'] ?? null);
+    $dbError = null;
 
-    // 1. Sync to MySQL Database Tables if PDO connection active
     if ($pdo) {
-        if (!empty($input['primary_color'])) {
-            $stmt = $pdo->prepare("REPLACE INTO site_settings (setting_key, setting_value) VALUES ('primary_color', ?)");
-            $stmt->execute([$input['primary_color']]);
-        }
-        if (!empty($input['secondary_color'])) {
-            $stmt = $pdo->prepare("REPLACE INTO site_settings (setting_key, setting_value) VALUES ('secondary_color', ?)");
-            $stmt->execute([$input['secondary_color']]);
-        }
-        if (!empty($input['logo_url'])) {
-            $stmt = $pdo->prepare("REPLACE INTO site_settings (setting_key, setting_value) VALUES ('logo_url', ?)");
-            $stmt->execute([$input['logo_url']]);
-        }
-
-        if (isset($input['sections']) && is_array($input['sections'])) {
-            $stmt = $pdo->prepare("INSERT INTO sections (section_name, content) VALUES (?, ?) ON DUPLICATE KEY UPDATE content = VALUES(content)");
-            foreach ($input['sections'] as $newSec) {
-                $name    = $newSec['name'] ?? null;
-                $content = $newSec['content'] ?? null;
-                if ($name && $content) {
-                    $jsonStr = is_string($content) ? $content : json_encode($content, JSON_UNESCAPED_UNICODE);
-                    $stmt->execute([$name, $jsonStr]);
-                    $updatedSectionsCount++;
+        try {
+            foreach (['primary_color', 'secondary_color', 'logo_url', 'uploads_origin', 'site_url', 'laravel_api_url', 'deployment_mode', 'advisor_id'] as $settingKey) {
+                if (!empty($input[$settingKey])) {
+                    saveSiteSetting($pdo, $settingKey, $input[$settingKey]);
                 }
             }
+
+            if (isset($input['sections']) && is_array($input['sections'])) {
+                foreach ($input['sections'] as $newSec) {
+                    $name = $newSec['name'] ?? $newSec['section_name'] ?? null;
+                    $content = $newSec['content'] ?? null;
+                    $displayName = $newSec['display_name'] ?? null;
+                    $isVisible = array_key_exists('is_visible', $newSec) ? (bool)$newSec['is_visible'] : true;
+                    if (!$name) continue;
+                    if ($content !== null && $content !== '') {
+                        upsertPublishedSection($pdo, $name, $content, $advisorId, $displayName, $isVisible);
+                        $updatedSectionsCount++;
+                    } elseif (array_key_exists('is_visible', $newSec) || $displayName !== null) {
+                        updateSectionMetaOnly($pdo, $name, $displayName, $isVisible, $advisorId);
+                        $updatedSectionsCount++;
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            $dbError = $e->getMessage();
         }
+    } else {
+        $dbError = 'MySQL is not connected. Fill DB credentials in cpanel-config.php.';
     }
 
-    // 2. Also Sync to JSON File for fallback reliability
+    if ($pdo && !$dbError && !isPlaceholderDb($dbCfg['DB_NAME'], $dbCfg['DB_USER'])) {
+        persistDbConfig($dbCfg);
+    }
+
+    $configWritten = false;
+    $shouldWriteConfig = !empty($input['write_config'])
+        || (!empty($input['db_name']) && !empty($input['db_user']));
+    if ($shouldWriteConfig && !$dbError && !isPlaceholderDb($dbCfg['DB_NAME'], $dbCfg['DB_USER'])) {
+        $configWritten = persistCpanelConfigFile($dbCfg);
+    }
+
     if (!file_exists($dataDir)) mkdir($dataDir, 0755, true);
     $existing = file_exists($dataFile) ? (json_decode(file_get_contents($dataFile), true) ?: []) : [];
-
-    if (!empty($input['primary_color']))   $existing['primary_color']   = $input['primary_color'];
+    if (!empty($input['primary_color'])) $existing['primary_color'] = $input['primary_color'];
     if (!empty($input['secondary_color'])) $existing['secondary_color'] = $input['secondary_color'];
-    if (!empty($input['logo_url']))        $existing['logo_url']        = $input['logo_url'];
-
-    if (!isset($existing['sections']) || !is_array($existing['sections'])) {
-        $existing['sections'] = [];
-    }
+    if (!empty($input['logo_url'])) $existing['logo_url'] = $input['logo_url'];
+    if (!isset($existing['sections']) || !is_array($existing['sections'])) $existing['sections'] = [];
 
     if (isset($input['sections']) && is_array($input['sections'])) {
+        if (!isset($existing['sections_meta']) || !is_array($existing['sections_meta'])) {
+            $existing['sections_meta'] = [];
+        }
         foreach ($input['sections'] as $newSec) {
-            $name    = $newSec['name'] ?? null;
+            $name = $newSec['name'] ?? $newSec['section_name'] ?? null;
             $content = $newSec['content'] ?? null;
-            if ($name && $content) {
-                $parsedContent = is_string($content) ? (json_decode($content, true) ?: $content) : $content;
-                $existing['sections'][$name] = $parsedContent;
+            $displayName = $newSec['display_name'] ?? null;
+            $isVisible = array_key_exists('is_visible', $newSec) ? (bool)$newSec['is_visible'] : true;
+            if ($name && $content !== null && $content !== '') {
+                $parsed = is_string($content) ? (json_decode($content, true) ?: $content) : $content;
+                $canonical = canonicalSectionName($name);
+                $existing['sections'][$canonical] = $parsed;
+                $existing['sections_meta'][$canonical] = [
+                    'display_name' => $displayName ?: $canonical,
+                    'is_visible'   => $isVisible,
+                ];
                 if (!$pdo) $updatedSectionsCount++;
             }
         }
@@ -837,25 +773,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     file_put_contents($dataFile, json_encode($existing, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
-    http_response_code(200);
+    http_response_code($dbError ? 500 : 200);
     echo json_encode([
-        'status'        => 'success',
-        'message'       => 'Showcase content successfully updated on cPanel MySQL DB & JSON file!',
-        'db_active'     => (bool)$pdo,
+        'status' => $dbError ? 'error' : 'success',
+        'message' => $dbError
+            ? ('Failed saving content: ' . $dbError)
+            : 'Content saved successfully',
+        'deployment_mode' => $deploymentMode,
+        'db_active' => (bool)$pdo,
+        'config_written' => $configWritten,
         'updated_count' => $updatedSectionsCount,
-        'data'          => $existing
+        'data' => $existing,
     ]);
     exit;
 }
-
-// --------------------------------------------------------------------------
-// GET REQUEST: SERVE LIVE SHOWCASE CONTENT FOR REACT TEMPLATE
-// Called with ?showcase=1&slug=template4 from the React frontend.
-// Primary source: Laravel `templates.dummy_content` (edit this JSON in MySQL).
-// Fallbacks: local `sections` table, then JSON file.
-// --------------------------------------------------------------------------
-$slug = $_GET['slug'] ?? 'template4';
-$slug = preg_replace('/[^a-z0-9_-]/i', '', $slug) ?: 'template4';
 
 $result = [
     'primary_color'   => '#0B1B3D',
@@ -863,142 +794,54 @@ $result = [
     'logo_url'        => '/assets/intime/logo-dark.png',
     'sections'        => [],
     'sections_list'   => [],
-    'content_source'  => 'empty'
+    'content_source'  => 'empty',
+    'deployment_mode' => $deploymentMode,
+    'db_connected'    => (bool)$pdo,
+    'db_name'         => (!empty($dbCfg['DB_NAME']) && !isPlaceholderDb($dbCfg['DB_NAME'], $dbCfg['DB_USER'] ?? '')) ? $dbCfg['DB_NAME'] : null,
+    'db_error'        => $PDO_CONNECT_ERROR,
 ];
 
 if ($pdo) {
-    try {
-        $settingsStmt = $pdo->query("SELECT setting_key, setting_value FROM site_settings");
-        while ($row = $settingsStmt->fetch()) {
-            $result[$row['setting_key']] = $row['setting_value'];
-        }
-    } catch (Exception $e) {
-        // site_settings is optional
-    }
-
-    // 1. Primary: templates.dummy_content (central Laravel catalog)
-    try {
-        $tplStmt = $pdo->prepare("SELECT dummy_content FROM templates WHERE slug = ? LIMIT 1");
-        $tplStmt->execute([$slug]);
-        $tplRow = $tplStmt->fetch();
-        if ($tplRow) {
-            $content = decodeDummyContent($tplRow['dummy_content']);
-            $seed = loadSeedDummyContent($slug);
-            $heroHasLists = isset($content['Hero Slider']['slides']) && is_array($content['Hero Slider']['slides']);
-            
-            // Force update hero slider to new slides structure
-            if (isset($content['Hero Slider']) && !$heroHasLists) {
-                $oldHero = $content['Hero Slider'];
-                if (is_array($oldHero) && !isset($oldHero['slides']) && (isset($oldHero['heading']) || isset($oldHero['eyebrow']))) {
-                    // Migrate old structure to new slides structure
-                    $newHeroSlider = [
-                        'slides' => [
-                            [
-                                'id' => 1,
-                                'bg' => $oldHero['image_url'] ?? 'https://images.unsplash.com/photo-1551836022-d5d88e9218df?w=800&auto=format&fit=crop&q=80',
-                                'eyebrow' => $oldHero['eyebrow'] ?? 'FINANCIAL CENTRE & WEALTH MANAGEMENT',
-                                'heading' => $oldHero['heading'] ?? 'Strategic Advisory for Long-Term Growth',
-                                'subheading' => $oldHero['subheading'] ?? 'Customized financial planning, investment strategies, and fiduciary advice for leaders and families.',
-                                'text' => $oldHero['text'] ?? 'We partner with you to navigate complex economic landscapes with confidence.',
-                                'button_text' => $oldHero['button_text'] ?? 'GET IN TOUCH',
-                                'button_url' => $oldHero['button_url'] ?? '#appointment',
-                                'youtube_url' => 'https://www.youtube.com/watch?v=SF4aHwxHtZ0'
-                            ],
-                            [
-                                'id' => 2,
-                                'bg' => 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?w=800&auto=format&fit=crop&q=80',
-                                'eyebrow' => 'FINANCIAL CENTRE & WEALTH MANAGEMENT',
-                                'heading' => 'We do the best thing for market funding',
-                                'subheading' => 'High-impact financial solutions: institutional-grade portfolio management and risk mitigation strategies.',
-                                'text' => 'Our team delivers proven results through disciplined investment approaches.',
-                                'button_text' => 'GET IN TOUCH',
-                                'button_url' => '#appointment',
-                                'youtube_url' => 'https://www.youtube.com/watch?v=SF4aHwxHtZ0'
-                            ],
-                            [
-                                'id' => 3,
-                                'bg' => 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=800&auto=format&fit=crop&q=80',
-                                'eyebrow' => 'FINANCIAL CENTRE & WEALTH MANAGEMENT',
-                                'heading' => 'We have to do business for your satisfaction',
-                                'subheading' => 'Building lasting relationships through transparent communication and exceptional service.',
-                                'text' => 'Your financial success is our primary mission and commitment.',
-                                'button_text' => 'GET IN TOUCH',
-                                'button_url' => '#appointment',
-                                'youtube_url' => 'https://www.youtube.com/watch?v=SF4aHwxHtZ0'
-                            ]
-                        ]
-                    ];
-                    $content['Hero Slider'] = $newHeroSlider;
-                    $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
-                    $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
-                }
-            }
-            
-            if ($seed && !$heroHasLists && !isset($content['Hero Slider']['slides'])) {
-                $content = array_replace_recursive($seed, $content);
-                $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
-                $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
-            }
-            if (ensureWhatWeDoSection($content) || ensureAboutSection($content) || ensureCompanyHistorySection($content) || ensureFeaturedServicesSection($content) || ensureAnnualProgressionSection($content) || ensurePortfolioSection($content) || ensureBranchesSection($content) || ensureCounterStatsSection($content) || ensureTestimonialsSection($content) || ensureLatestNewsSection($content) || ensureClientLogosSection($content) || ensureCtaBannerSection($content)) {
-                $upd = $pdo->prepare("UPDATE templates SET dummy_content = ? WHERE slug = ?");
-                $upd->execute([json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $slug]);
-            }
-            if (!empty($content)) {
-                [$result['sections'], $result['sections_list']] = dummyToSections($content);
-                $result['content_source'] = 'templates.dummy_content';
-            }
-        }
-    } catch (Exception $e) {
-        // templates table may not exist on older DBs
+    loadSiteSettings($pdo, $result);
+    if (!empty($result['deployment_mode'])) {
+        $deploymentMode = strtolower((string)$result['deployment_mode']);
     }
 }
 
-// 2. Fetch from Laravel backend sections table (advisor_id IS NULL for showcase)
-if (empty($result['sections']) && $pdo) {
+if ($deploymentMode === 'showcase' && $pdo) {
+    $slug = preg_replace('/[^a-z0-9_-]/i', '', $_GET['slug'] ?? 'template4') ?: 'template4';
+    $showcase = fetchShowcaseContent($pdo, $slug, file_exists($showcaseDataFile) ? $showcaseDataFile : $dataFile);
+    if ($showcase) {
+        if (!empty($showcase['sections'])) $result['sections'] = $showcase['sections'];
+        if (!empty($showcase['sections_list'])) $result['sections_list'] = $showcase['sections_list'];
+        if (!empty($showcase['content_source'])) $result['content_source'] = $showcase['content_source'];
+        foreach (['primary_color', 'secondary_color', 'logo_url'] as $colorKey) {
+            if (!empty($showcase[$colorKey])) $result[$colorKey] = $showcase[$colorKey];
+        }
+    }
+} elseif ($pdo) {
+    $advisorId = $_GET['advisor_id'] ?? $result['advisor_id'] ?? $dbCfg['ADVISOR_ID'] ?? null;
     try {
-        // Get the home page ID
-        $pageStmt = $pdo->prepare("SELECT id FROM pages WHERE slug = 'home' LIMIT 1");
-        $pageStmt->execute();
-        $pageRow = $pageStmt->fetch();
-        
-        if ($pageRow) {
-            $pageId = $pageRow['id'];
-            // Fetch sections where advisor_id IS NULL (showcase content)
-            $secStmt = $pdo->prepare("SELECT name, content FROM sections WHERE page_id = ? AND advisor_id IS NULL ORDER BY id ASC");
-            $secStmt->execute([$pageId]);
-            
-            while ($row = $secStmt->fetch()) {
-                $name = $row['name'];
-                $cnt  = json_decode($row['content'], true) ?: $row['content'];
-                $result['sections'][$name] = $cnt;
-                $result['sections_list'][] = ['name' => $name, 'content' => $cnt];
-            }
-            if (!empty($result['sections'])) {
-                $result['content_source'] = 'laravel_backend_sections';
-            }
+        $dbRows = fetchSectionRows($pdo, $advisorId);
+        $rows = dedupeSectionRows($dbRows, $advisorId);
+        [$result['sections'], $result['sections_list']] = rowsToSections($rows);
+        if (count($dbRows) > 0) {
+            $result['content_source'] = 'cpanel_sections';
         }
     } catch (Exception $e) {
-        // Fallback to json if DB query fails
+        $result['db_error'] = $e->getMessage();
     }
 }
 
-// 3. Fallback to JSON File if MySQL was empty or disabled
-if (empty($result['sections']) && file_exists($dataFile)) {
-    $fileData = json_decode(file_get_contents($dataFile), true) ?: [];
-    if (!empty($fileData['primary_color']))   $result['primary_color']   = $fileData['primary_color'];
-    if (!empty($fileData['secondary_color'])) $result['secondary_color'] = $fileData['secondary_color'];
-    if (!empty($fileData['logo_url']))        $result['logo_url']        = $fileData['logo_url'];
+if (count($result['sections_list']) === 0 && empty($result['sections'])) {
+    loadJsonFallback($result, $dataFile);
+}
 
-    if (isset($fileData['sections']) && is_array($fileData['sections'])) {
-        $result['sections'] = $fileData['sections'];
-        foreach ($fileData['sections'] as $secName => $secContent) {
-            $result['sections_list'][] = [
-                'name'    => $secName,
-                'content' => is_string($secContent) ? json_decode($secContent, true) ?: $secContent : $secContent
-            ];
-        }
-        $result['content_source'] = 'json_file';
-    }
+if (empty($result['uploads_origin']) && !empty($dbCfg['UPLOADS_ORIGIN'])) {
+    $result['uploads_origin'] = $dbCfg['UPLOADS_ORIGIN'];
+}
+if (empty($result['site_url']) && !empty($dbCfg['SITE_URL'])) {
+    $result['site_url'] = $dbCfg['SITE_URL'];
 }
 
 echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
