@@ -2,22 +2,30 @@ import React, { useState, useEffect } from 'react';
 import { FaPlay, FaArrowRight } from 'react-icons/fa';
 import { getLocalImg, imgFallback, images } from '../../utils/img';
 
-// Must match public/data/default-sections.json → Hero Slider.slides
 const DEFAULT_SLIDES = [
   {
     id: 1,
+    bg: images.bgSlider1 || images.intime08,
+    eyebrow: 'FINANCIAL CENTRE & WEALTH MANAGEMENT',
+    heading: 'Prosper in this volatile market funding.',
+    subheading: 'Customized financial planning, investment strategies, and fiduciary advice for leaders and families.',
     title: ['Prosper in this', 'volatile market', 'funding.'],
-    image_url: 'intime-08',
   },
   {
     id: 2,
+    bg: images.bgSlider2 || images.intime12,
+    eyebrow: 'STRATEGIC GROWTH & ADVISORY',
+    heading: 'We do the best thing for market funding.',
+    subheading: 'Comprehensive solutions tailored to accelerate your financial goals and wealth stability.',
     title: ['We do the best', 'thing for market', 'funding.'],
-    image_url: 'intime-12',
   },
   {
     id: 3,
+    bg: images.bgSlider3 || images.intime15,
+    eyebrow: 'TRUSTED FIDUCIARY ADVISORY',
+    heading: 'We have to do business for your satisfaction.',
+    subheading: 'Dedicated experts navigating market complexity to protect and grow your assets.',
     title: ['We have to do', 'business for your', 'Satisfiction.'],
-    image_url: 'intime-15',
   },
 ];
 

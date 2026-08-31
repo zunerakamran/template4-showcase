@@ -837,28 +837,6 @@ if (count($result['sections_list']) === 0 && empty($result['sections'])) {
     loadJsonFallback($result, $dataFile);
 }
 
-// Flat seed JSON (same shape as hub templates.dummy_content / default-sections.json)
-if (count($result['sections_list']) === 0 && empty($result['sections'])) {
-    $seed = loadSeedSections();
-    if ($seed) {
-        $list = [];
-        foreach ($seed as $secName => $secContent) {
-            $name = canonicalSectionName($secName);
-            $cnt = is_string($secContent) ? (json_decode($secContent, true) ?: $secContent) : $secContent;
-            $result['sections'][$name] = $cnt;
-            $list[] = [
-                'name'         => $name,
-                'section_key'  => canonicalSectionKey($name),
-                'display_name' => $name,
-                'is_visible'   => true,
-                'content'      => $cnt,
-            ];
-        }
-        $result['sections_list'] = $list;
-        $result['content_source'] = 'default_sections_seed';
-    }
-}
-
 if (empty($result['uploads_origin']) && !empty($dbCfg['UPLOADS_ORIGIN'])) {
     $result['uploads_origin'] = $dbCfg['UPLOADS_ORIGIN'];
 }
