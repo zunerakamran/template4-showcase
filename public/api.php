@@ -396,7 +396,10 @@ function ensureAdvisorSchema(PDO $pdo) {
         $nameCol = $cols['section_name'] ?? $cols['name'] ?? null;
         if ($nameCol) {
             $count = (int)$pdo->query('SELECT COUNT(*) FROM `sections`')->fetchColumn();
-            if ($count === 0) {
+            // Skip local JSON seed when Laravel is pushing showcase/hub sections in this request.
+            $incomingSections = $GLOBALS['__cpanel_incoming_sections'] ?? [];
+            $hasIncoming = is_array($incomingSections) && count($incomingSections) > 0;
+            if ($count === 0 && !$hasIncoming) {
                 $seed = loadSeedSections();
                 if ($seed) {
                     $stmt = $pdo->prepare("INSERT INTO `sections` (`{$nameCol}`, `content`) VALUES (?, ?)");
@@ -682,6 +685,7 @@ function loadJsonFallback(array &$result, $file) {
 
 $rawInput = file_get_contents('php://input');
 $input = $_SERVER['REQUEST_METHOD'] === 'POST' ? (json_decode($rawInput, true) ?: []) : [];
+$GLOBALS['__cpanel_incoming_sections'] = (isset($input['sections']) && is_array($input['sections'])) ? $input['sections'] : [];
 $dbCfg = resolveDbConfig($_SERVER['REQUEST_METHOD'] === 'POST' ? $input : null);
 if (!empty($dbCfg['SECRET_API_KEY'])) {
     $SECRET_API_KEY = $dbCfg['SECRET_API_KEY'];
